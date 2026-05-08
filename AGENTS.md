@@ -34,7 +34,7 @@ report is
   wl-gammarelay-rs. There is no `loop { check_time(); sleep(N);
   }` anywhere. See `~/primary/skills/push-not-pull.md`.
 - **rkyv on the wire, NOTA at the human boundary.** Daemon ↔
-  CLI is rkyv-archived `ChromaRequest` / `ChromaResponse` frames
+  CLI is rkyv-archived `Request` / `Response` frames
   on a Unix socket (the canonical signal pattern from
   `~/primary/repos/signal`). The CLI parses NOTA argv into the
   typed request, archives it, and prints the rkyv-deserialised

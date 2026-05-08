@@ -19,9 +19,9 @@ Chroma owns:
 
 - the schedule across all three axes (when to apply what)
 - the persisted current value per axis (in redb + rkyv)
-- the typed CLI request grammar (`ChromaRequest` / `ChromaResponse`)
+- the typed CLI request grammar (`Request` / `Response`)
 - the IPC contract between CLI and daemon (rkyv-on-UDS)
-- the configuration grammar (`ChromaConfig`, NOTA on disk)
+- the configuration grammar (`Config`, NOTA on disk)
 - the geoclue2 subscription (when twilight triggers are used)
 - the orchestration of ramps (start, interrupt, replace)
 
@@ -62,7 +62,7 @@ instant (`SetWarmth`, `SetBrightness`) and gradual
 ## Actor topology
 
 ```
-ChromaSupervisor
+Supervisor
 ├── StateStore                       (redb handle; one row per axis)
 ├── ThemeApplier                     (apply-command path)
 ├── WarmthApplier                    (zbus to wl-gammarelay-rs Temperature)
@@ -91,9 +91,9 @@ Daemon ↔ CLI is the **signal pattern** documented in
 - Transport: Unix domain socket at
   `$XDG_RUNTIME_DIR/chroma.sock`
 - Framing: 4-byte big-endian length, then the rkyv archive
-- Request: `ChromaRequest` enum (one variant per CLI verb)
-- Reply: `ChromaResponse` enum (`State(VisualState)`, `Acked`,
-  `Error(ChromaError)`)
+- Request: `Request` enum (one variant per CLI verb)
+- Reply: `Response` enum (`State(VisualState)`, `Acked`,
+  `Error(Error)`)
 - Pairing: by position on the connection (FIFO)
 
 The CLI binary is a thin signal client: parse NOTA argv into a
@@ -103,10 +103,10 @@ reply → bytecheck-validate → print as NOTA.
 ## Configuration
 
 Single NOTA record at `~/.config/chroma/config.nota`. Re-parsed
-on inotify push. Parses into a typed `ChromaConfig`:
+on inotify push. Parses into a typed `Config`:
 
 ```
-(ChromaConfig
+(Config
   (Theme       (ApplyCommand <path>) (Schedule …))
   (Warmth      (Schedule …))
   (Brightness  (Schedule …)))
@@ -140,9 +140,9 @@ version-skew guard at boot hard-fails on mismatch.
 | Boundary | Format |
 |---|---|
 | In-process: actor ↔ actor | typed Rust values |
-| Daemon ↔ CLI | rkyv-archived `ChromaRequest` / `ChromaResponse`, length-prefixed |
+| Daemon ↔ CLI | rkyv-archived `Request` / `Response`, length-prefixed |
 | Daemon ↔ disk (state) | rkyv values inside redb tables |
-| Daemon ↔ disk (config) | NOTA text record (`ChromaConfig`) |
+| Daemon ↔ disk (config) | NOTA text record (`Config`) |
 | Daemon ↔ wl-gammarelay-rs | zbus property writes (`Temperature` u16, `Brightness` f64) |
 | Daemon ↔ geoclue2 | zbus signal subscription |
 | Daemon ↔ apply command | process spawn with one positional arg |
