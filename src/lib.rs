@@ -10,3 +10,11 @@
 //! See `ARCHITECTURE.md` for the system shape, `AGENTS.md` for
 //! the agent contract, and `skills.md` for project-specific
 //! intent and invariants.
+
+pub mod brightness;
+pub mod theme;
+pub mod warmth;
+
+pub use brightness::{BrightnessLevel, BrightnessPercent};
+pub use theme::ThemeMode;
+pub use warmth::{KelvinTemperature, WarmthLevel};

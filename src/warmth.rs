@@ -1,0 +1,132 @@
+//! [`WarmthLevel`] and [`KelvinTemperature`] — the warmth axis.
+//!
+//! Six discrete preset levels ([`WarmthLevel::Cold`] through
+//! [`WarmthLevel::Warmest`]) over a kelvin range
+//! `[KelvinTemperature::MIN, KelvinTemperature::MAX]` =
+//! `[1000, 10000]`. The wl-gammarelay-rs `Temperature` DBus
+//! property is a `q` (u16); [`KelvinTemperature::as_u16`] is the
+//! wire form.
+
+use core::fmt;
+
+/// A discrete warmth level on the daemon's standard ladder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WarmthLevel {
+    Cold,
+    Cool,
+    Neutral,
+    Warm,
+    Warmer,
+    Warmest,
+}
+
+impl WarmthLevel {
+    /// The canonical kelvin value for this preset.
+    pub const fn kelvin(self) -> KelvinTemperature {
+        match self {
+            WarmthLevel::Cold => KelvinTemperature(6500),
+            WarmthLevel::Cool => KelvinTemperature(5500),
+            WarmthLevel::Neutral => KelvinTemperature(4500),
+            WarmthLevel::Warm => KelvinTemperature(3700),
+            WarmthLevel::Warmer => KelvinTemperature(3200),
+            WarmthLevel::Warmest => KelvinTemperature(2700),
+        }
+    }
+
+    /// The next-warmer preset. Saturates at [`WarmthLevel::Warmest`].
+    pub const fn warmer(self) -> Self {
+        match self {
+            WarmthLevel::Cold => WarmthLevel::Cool,
+            WarmthLevel::Cool => WarmthLevel::Neutral,
+            WarmthLevel::Neutral => WarmthLevel::Warm,
+            WarmthLevel::Warm => WarmthLevel::Warmer,
+            WarmthLevel::Warmer => WarmthLevel::Warmest,
+            WarmthLevel::Warmest => WarmthLevel::Warmest,
+        }
+    }
+
+    /// The next-cooler preset. Saturates at [`WarmthLevel::Cold`].
+    pub const fn cooler(self) -> Self {
+        match self {
+            WarmthLevel::Cold => WarmthLevel::Cold,
+            WarmthLevel::Cool => WarmthLevel::Cold,
+            WarmthLevel::Neutral => WarmthLevel::Cool,
+            WarmthLevel::Warm => WarmthLevel::Neutral,
+            WarmthLevel::Warmer => WarmthLevel::Warm,
+            WarmthLevel::Warmest => WarmthLevel::Warmer,
+        }
+    }
+
+    /// Lowercase name (for human-facing display and CLI replies).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            WarmthLevel::Cold => "cold",
+            WarmthLevel::Cool => "cool",
+            WarmthLevel::Neutral => "neutral",
+            WarmthLevel::Warm => "warm",
+            WarmthLevel::Warmer => "warmer",
+            WarmthLevel::Warmest => "warmest",
+        }
+    }
+}
+
+impl Default for WarmthLevel {
+    fn default() -> Self {
+        WarmthLevel::Neutral
+    }
+}
+
+impl fmt::Display for WarmthLevel {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// A colour-temperature value in kelvins.
+///
+/// The wire form for wl-gammarelay-rs's `Temperature` (q) DBus
+/// property. Construction clamps to the daemon's accepted range
+/// `[MIN, MAX]` = `[1000, 10000]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct KelvinTemperature(u16);
+
+impl KelvinTemperature {
+    /// The lowest accepted value (warmest extreme).
+    pub const MIN: Self = Self(1000);
+    /// The highest accepted value (coldest extreme).
+    pub const MAX: Self = Self(10000);
+
+    /// Construct a kelvin value, clamping to `[MIN, MAX]`.
+    pub const fn new(value: u16) -> Self {
+        let clamped = if value < Self::MIN.0 {
+            Self::MIN.0
+        } else if value > Self::MAX.0 {
+            Self::MAX.0
+        } else {
+            value
+        };
+        Self(clamped)
+    }
+
+    /// The integer kelvin value, suitable for the wl-gammarelay-rs
+    /// `Temperature` (q) DBus property.
+    pub const fn as_u16(self) -> u16 {
+        self.0
+    }
+
+    /// Linear interpolation from `self` toward `target` at
+    /// `fraction` ∈ `[0, 1]` (clamped at the boundaries).
+    pub fn lerp_to(self, target: Self, fraction: f64) -> Self {
+        let fraction = fraction.clamp(0.0, 1.0);
+        let from = self.0 as f64;
+        let to = target.0 as f64;
+        let interpolated = from + (to - from) * fraction;
+        Self::new(interpolated.round() as u16)
+    }
+}
+
+impl fmt::Display for KelvinTemperature {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}K", self.0)
+    }
+}
