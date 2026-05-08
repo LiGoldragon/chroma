@@ -10,11 +10,13 @@
 
 use core::fmt;
 
+use nota_codec::NotaEnum;
+
 use crate::config::ApplyCommand;
 use crate::time::RampTrigger;
 
 /// The active colour scheme.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, NotaEnum)]
 pub enum ThemeMode {
     Dark,
     Light,

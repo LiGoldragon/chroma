@@ -12,10 +12,12 @@
 
 use core::fmt;
 
+use nota_codec::NotaEnum;
+
 use crate::time::{RampDuration, RampTrigger};
 
 /// A discrete warmth level on the daemon's standard ladder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, NotaEnum)]
 pub enum WarmthLevel {
     Cold,
     Cool,

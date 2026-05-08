@@ -1,4 +1,16 @@
 use chroma::{KelvinTemperature, WarmthLevel};
+use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode};
+
+fn round_trip_nota<T>(value: &T) -> T
+where
+    T: NotaEncode + NotaDecode + Clone,
+{
+    let mut encoder = Encoder::nota();
+    value.encode(&mut encoder).expect("encode");
+    let text = encoder.into_string();
+    let mut decoder = Decoder::nota(&text);
+    T::decode(&mut decoder).expect("decode")
+}
 
 #[test]
 fn levels_are_ordered_warm_to_cold_in_kelvin() {
@@ -152,4 +164,20 @@ fn levels_match_canonical_kelvin() {
     assert_eq!(WarmthLevel::Warm.kelvin().as_u16(), 3700);
     assert_eq!(WarmthLevel::Warmer.kelvin().as_u16(), 3200);
     assert_eq!(WarmthLevel::Warmest.kelvin().as_u16(), 2700);
+}
+
+#[test]
+fn nota_round_trips_every_level() {
+    for level in
+        [WarmthLevel::Cold, WarmthLevel::Cool, WarmthLevel::Neutral, WarmthLevel::Warm, WarmthLevel::Warmer, WarmthLevel::Warmest]
+    {
+        assert_eq!(round_trip_nota(&level), level);
+    }
+}
+
+#[test]
+fn nota_encodes_as_pascal_variant_name() {
+    let mut encoder = Encoder::nota();
+    WarmthLevel::Warmest.encode(&mut encoder).expect("encode");
+    assert_eq!(encoder.into_string(), "Warmest");
 }

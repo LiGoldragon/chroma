@@ -1,4 +1,16 @@
 use chroma::{BrightnessLevel, BrightnessPercent};
+use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode};
+
+fn round_trip_nota<T>(value: &T) -> T
+where
+    T: NotaEncode + NotaDecode + Clone,
+{
+    let mut encoder = Encoder::nota();
+    value.encode(&mut encoder).expect("encode");
+    let text = encoder.into_string();
+    let mut decoder = Decoder::nota(&text);
+    T::decode(&mut decoder).expect("decode")
+}
 
 #[test]
 fn levels_are_ordered_dim_to_bright_in_percent() {
@@ -152,4 +164,25 @@ fn levels_match_canonical_percent() {
     assert_eq!(BrightnessLevel::Bright.percent().as_u8(), 85);
     assert_eq!(BrightnessLevel::Brighter.percent().as_u8(), 95);
     assert_eq!(BrightnessLevel::Brightest.percent().as_u8(), 100);
+}
+
+#[test]
+fn nota_round_trips_every_level() {
+    for level in [
+        BrightnessLevel::Dim,
+        BrightnessLevel::Dimmer,
+        BrightnessLevel::Mid,
+        BrightnessLevel::Bright,
+        BrightnessLevel::Brighter,
+        BrightnessLevel::Brightest,
+    ] {
+        assert_eq!(round_trip_nota(&level), level);
+    }
+}
+
+#[test]
+fn nota_encodes_as_pascal_variant_name() {
+    let mut encoder = Encoder::nota();
+    BrightnessLevel::Brightest.encode(&mut encoder).expect("encode");
+    assert_eq!(encoder.into_string(), "Brightest");
 }
