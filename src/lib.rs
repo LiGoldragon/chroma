@@ -12,13 +12,23 @@
 //! intent and invariants.
 
 pub mod brightness;
+pub mod client;
 pub mod config;
+pub mod daemon;
+pub mod error;
+pub mod gamma;
+pub mod request;
+pub mod response;
 pub mod theme;
 pub mod time;
 pub mod warmth;
+pub mod wire;
 
 pub use brightness::{BrightnessAxis, BrightnessLevel, BrightnessPercent, BrightnessSchedule, BrightnessWaypoint};
 pub use config::{ApplyCommand, Config};
+pub use error::{Error, Result};
+pub use request::Request;
+pub use response::Response;
 pub use theme::{ThemeAxis, ThemeMode, ThemeSchedule, ThemeWaypoint};
 pub use time::{LocalHour, LocalMinute, RampDuration, RampTrigger, SignedMinutes};
 pub use warmth::{KelvinTemperature, WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint};

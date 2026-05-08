@@ -12,12 +12,15 @@
 
 use core::fmt;
 
-use nota_codec::NotaEnum;
+use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaEnum};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::time::{RampDuration, RampTrigger};
 
 /// A discrete warmth level on the daemon's standard ladder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, NotaEnum)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, NotaEnum, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub enum WarmthLevel {
     Cold,
     Cool,
@@ -92,10 +95,11 @@ impl fmt::Display for WarmthLevel {
 /// A colour-temperature value in kelvins.
 ///
 /// The wire form for wl-gammarelay-rs's `Temperature` (q) DBus
-/// property. Construction clamps to the daemon's accepted range
-/// `[MIN, MAX]` = `[1000, 10000]`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct KelvinTemperature(pub(crate) u16);
+/// property. All construction paths — including [`NotaDecode`]
+/// — clamp to the daemon's accepted range `[MIN, MAX]` =
+/// `[1000, 10000]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, RkyvSerialize, RkyvDeserialize)]
+pub struct KelvinTemperature(u16);
 
 impl KelvinTemperature {
     /// The lowest accepted value (warmest extreme).
@@ -135,6 +139,22 @@ impl KelvinTemperature {
 impl fmt::Display for KelvinTemperature {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}K", self.0)
+    }
+}
+
+// Hand-written NOTA codec — routes decode through `new` so
+// out-of-range values clamp consistently. NotaTransparent would
+// bypass the clamp.
+impl NotaEncode for KelvinTemperature {
+    fn encode(&self, encoder: &mut Encoder) -> nota_codec::Result<()> {
+        encoder.write_u64(self.0 as u64)
+    }
+}
+
+impl NotaDecode for KelvinTemperature {
+    fn decode(decoder: &mut Decoder<'_>) -> nota_codec::Result<Self> {
+        let raw = decoder.read_u16()?;
+        Ok(Self::new(raw))
     }
 }
 

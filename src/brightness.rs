@@ -11,12 +11,15 @@
 
 use core::fmt;
 
-use nota_codec::NotaEnum;
+use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaEnum};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::time::{RampDuration, RampTrigger};
 
 /// A discrete brightness level on the daemon's standard ladder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, NotaEnum)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, NotaEnum, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub enum BrightnessLevel {
     Dim,
     Dimmer,
@@ -92,9 +95,10 @@ impl fmt::Display for BrightnessLevel {
 ///
 /// wl-gammarelay-rs's `Brightness` DBus property is a `d`
 /// (double) in `[0.0, 1.0]`; convert with [`Self::as_fraction`].
-/// Construction clamps to `[MIN, MAX]` = `[0, 100]`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct BrightnessPercent(pub(crate) u8);
+/// All construction paths — including [`NotaDecode`] — clamp to
+/// `[MIN, MAX]` = `[0, 100]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, RkyvSerialize, RkyvDeserialize)]
+pub struct BrightnessPercent(u8);
 
 impl BrightnessPercent {
     /// The minimum value (fully dim).
@@ -133,6 +137,21 @@ impl BrightnessPercent {
 impl fmt::Display for BrightnessPercent {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}%", self.0)
+    }
+}
+
+// Hand-written NOTA codec — routes decode through `new` so
+// out-of-range values clamp consistently.
+impl NotaEncode for BrightnessPercent {
+    fn encode(&self, encoder: &mut Encoder) -> nota_codec::Result<()> {
+        encoder.write_u64(self.0 as u64)
+    }
+}
+
+impl NotaDecode for BrightnessPercent {
+    fn decode(decoder: &mut Decoder<'_>) -> nota_codec::Result<Self> {
+        let raw = decoder.read_u8()?;
+        Ok(Self::new(raw))
     }
 }
 

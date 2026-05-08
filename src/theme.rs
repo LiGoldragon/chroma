@@ -11,12 +11,15 @@
 use core::fmt;
 
 use nota_codec::NotaEnum;
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::config::ApplyCommand;
 use crate::time::RampTrigger;
 
 /// The active colour scheme.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, NotaEnum)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, NotaEnum, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub enum ThemeMode {
     Dark,
     Light,
