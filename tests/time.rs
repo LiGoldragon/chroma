@@ -1,5 +1,17 @@
 use chroma::{LocalHour, LocalMinute, RampDuration, RampTrigger, SignedMinutes};
 use core::time::Duration;
+use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode};
+
+fn round_trip_nota<T>(value: &T) -> T
+where
+    T: NotaEncode + NotaDecode,
+{
+    let mut encoder = Encoder::nota();
+    value.encode(&mut encoder).expect("encode");
+    let text = encoder.into_string();
+    let mut decoder = Decoder::nota(&text);
+    T::decode(&mut decoder).expect("decode")
+}
 
 #[test]
 fn ramp_duration_clamps_zero_to_min() {
@@ -109,4 +121,35 @@ fn ramp_trigger_display() {
     assert_eq!(format!("{}", RampTrigger::CivilDawn(SignedMinutes::new(-30))), "civil-dawn -30m");
     assert_eq!(format!("{}", RampTrigger::CivilDusk(SignedMinutes::new(60))), "civil-dusk +60m");
     assert_eq!(format!("{}", RampTrigger::TimeOfDay(LocalHour::new(7), LocalMinute::new(30))), "07:30");
+}
+
+#[test]
+fn ramp_duration_round_trips_minute_aligned_as_minutes() {
+    let one_hour = RampDuration::from_minutes(60);
+    let mut encoder = Encoder::nota();
+    one_hour.encode(&mut encoder).expect("encode");
+    assert_eq!(encoder.into_string(), "(Minutes 60)");
+    assert_eq!(round_trip_nota(&one_hour), one_hour);
+}
+
+#[test]
+fn ramp_duration_round_trips_seconds_when_not_minute_aligned() {
+    let thirty_seconds = RampDuration::from_seconds(30);
+    let mut encoder = Encoder::nota();
+    thirty_seconds.encode(&mut encoder).expect("encode");
+    assert_eq!(encoder.into_string(), "(Seconds 30)");
+    assert_eq!(round_trip_nota(&thirty_seconds), thirty_seconds);
+}
+
+#[test]
+fn ramp_duration_decodes_either_form() {
+    let mut decoder_minutes = Decoder::nota("(Minutes 5)");
+    let from_minutes = RampDuration::decode(&mut decoder_minutes).expect("decode minutes");
+    assert_eq!(from_minutes.as_seconds(), 300);
+
+    let mut decoder_seconds = Decoder::nota("(Seconds 300)");
+    let from_seconds = RampDuration::decode(&mut decoder_seconds).expect("decode seconds");
+    assert_eq!(from_seconds.as_seconds(), 300);
+
+    assert_eq!(from_minutes, from_seconds);
 }

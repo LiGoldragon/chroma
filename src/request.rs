@@ -10,6 +10,7 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use crate::brightness::{BrightnessLevel, BrightnessPercent};
 use crate::error::{Error, Result};
 use crate::theme::ThemeMode;
+use crate::time::RampDuration;
 use crate::warmth::{KelvinTemperature, WarmthLevel};
 
 /// What the CLI sends to the daemon.
@@ -19,18 +20,37 @@ pub enum Request {
     SetTheme { mode: ThemeMode },
     /// Read the current theme mode.
     GetTheme {},
-    /// Set warmth to a named preset.
+
+    /// Set warmth to a named preset (instant; cancels any active ramp).
     SetWarmth { level: WarmthLevel },
-    /// Set warmth to an arbitrary kelvin value.
+    /// Set warmth to an arbitrary kelvin value (instant; cancels any active ramp).
     SetWarmthKelvin { kelvin: KelvinTemperature },
     /// Read the current kelvin.
     GetWarmth {},
-    /// Set brightness to a named preset.
+    /// Begin a gradual warmth ramp toward `target` over `duration`,
+    /// starting from the daemon's current temperature reading.
+    /// Replaces any in-flight warmth ramp.
+    StartWarmthRamp { target: WarmthLevel, duration: RampDuration },
+    /// Like `StartWarmthRamp`, but with an arbitrary kelvin target.
+    StartWarmthRampKelvin { target: KelvinTemperature, duration: RampDuration },
+    /// Cancel any in-flight warmth ramp; the screen stays where it is.
+    InterruptWarmth {},
+
+    /// Set brightness to a named preset (instant; cancels any active ramp).
     SetBrightness { level: BrightnessLevel },
-    /// Set brightness to an arbitrary percent.
+    /// Set brightness to an arbitrary percent (instant; cancels any active ramp).
     SetBrightnessPercent { percent: BrightnessPercent },
     /// Read the current brightness percent.
     GetBrightness {},
+    /// Begin a gradual brightness ramp toward `target` over `duration`,
+    /// starting from the daemon's current brightness reading.
+    /// Replaces any in-flight brightness ramp.
+    StartBrightnessRamp { target: BrightnessLevel, duration: RampDuration },
+    /// Like `StartBrightnessRamp`, but with an arbitrary percent target.
+    StartBrightnessRampPercent { target: BrightnessPercent, duration: RampDuration },
+    /// Cancel any in-flight brightness ramp.
+    InterruptBrightness {},
+
     /// Read the full visual state (theme + warmth + brightness).
     GetState {},
 }

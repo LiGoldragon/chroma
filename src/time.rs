@@ -9,16 +9,21 @@
 use core::fmt;
 use core::time::Duration;
 
+use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+
 /// A positive duration over which a ramped axis interpolates.
 ///
-/// Construction clamps to ≥ 1 second so the lerp denominator is
-/// never zero.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RampDuration(Duration);
+/// Stored as whole seconds (`u64`) so it round-trips cleanly
+/// through both rkyv (the wire) and NOTA (the CLI argv).
+/// Construction clamps to ≥ 1 second so the lerp denominator
+/// is never zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, RkyvSerialize, RkyvDeserialize)]
+pub struct RampDuration(u64);
 
 impl RampDuration {
-    /// The shortest accepted ramp.
-    pub const MIN: Self = Self(Duration::from_secs(1));
+    /// The shortest accepted ramp (1 second).
+    pub const MIN: Self = Self(1);
 
     /// Construct from whole minutes, clamping to [`Self::MIN`].
     pub fn from_minutes(minutes: u32) -> Self {
@@ -27,24 +32,24 @@ impl RampDuration {
     }
 
     /// Construct from whole seconds, clamping to [`Self::MIN`].
-    pub fn from_seconds(seconds: u64) -> Self {
-        if seconds < 1 { Self::MIN } else { Self(Duration::from_secs(seconds)) }
+    pub const fn from_seconds(seconds: u64) -> Self {
+        if seconds < 1 { Self::MIN } else { Self(seconds) }
     }
 
     /// The underlying [`Duration`].
     pub const fn as_duration(self) -> Duration {
-        self.0
+        Duration::from_secs(self.0)
     }
 
     /// The duration in whole seconds.
     pub const fn as_seconds(self) -> u64 {
-        self.0.as_secs()
+        self.0
     }
 }
 
 impl fmt::Display for RampDuration {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let total = self.0.as_secs();
+        let total = self.0;
         if total >= 60 {
             let minutes = total / 60;
             let seconds = total % 60;
@@ -55,6 +60,48 @@ impl fmt::Display for RampDuration {
             }
         } else {
             write!(formatter, "{total}s")
+        }
+    }
+}
+
+// NOTA wire form: `(Minutes <n>)` or `(Seconds <n>)`. Encoded
+// in whichever form fits cleanly: if the duration is a whole
+// number of minutes, emit `(Minutes <n>)`; otherwise emit
+// `(Seconds <n>)`. Decoder accepts either.
+impl NotaEncode for RampDuration {
+    fn encode(&self, encoder: &mut Encoder) -> nota_codec::Result<()> {
+        if self.0 % 60 == 0 {
+            encoder.start_record("Minutes")?;
+            encoder.write_u64(self.0 / 60)?;
+            encoder.end_record()
+        } else {
+            encoder.start_record("Seconds")?;
+            encoder.write_u64(self.0)?;
+            encoder.end_record()
+        }
+    }
+}
+
+impl NotaDecode for RampDuration {
+    fn decode(decoder: &mut Decoder<'_>) -> nota_codec::Result<Self> {
+        let head = decoder.peek_record_head()?;
+        match head.as_str() {
+            "Minutes" => {
+                decoder.expect_record_head("Minutes")?;
+                let minutes = decoder.read_u64()?;
+                decoder.expect_record_end()?;
+                Ok(Self::from_seconds(minutes.saturating_mul(60)))
+            }
+            "Seconds" => {
+                decoder.expect_record_head("Seconds")?;
+                let seconds = decoder.read_u64()?;
+                decoder.expect_record_end()?;
+                Ok(Self::from_seconds(seconds))
+            }
+            other => Err(nota_codec::Error::UnknownKindForVerb {
+                verb: "RampDuration",
+                got: other.to_string(),
+            }),
         }
     }
 }
