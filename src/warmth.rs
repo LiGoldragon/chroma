@@ -6,8 +6,13 @@
 //! `[1000, 10000]`. The wl-gammarelay-rs `Temperature` DBus
 //! property is a `q` (u16); [`KelvinTemperature::as_u16`] is the
 //! wire form.
+//!
+//! This module also names the axis's scheduling shape:
+//! [`WarmthWaypoint`], [`WarmthSchedule`], [`WarmthAxis`].
 
 use core::fmt;
+
+use crate::time::{RampDuration, RampTrigger};
 
 /// A discrete warmth level on the daemon's standard ladder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -87,8 +92,8 @@ impl fmt::Display for WarmthLevel {
 /// The wire form for wl-gammarelay-rs's `Temperature` (q) DBus
 /// property. Construction clamps to the daemon's accepted range
 /// `[MIN, MAX]` = `[1000, 10000]`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct KelvinTemperature(u16);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct KelvinTemperature(pub(crate) u16);
 
 impl KelvinTemperature {
     /// The lowest accepted value (warmest extreme).
@@ -129,4 +134,50 @@ impl fmt::Display for KelvinTemperature {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}K", self.0)
     }
+}
+
+/// One scheduled warmth waypoint — at this trigger, ramp to
+/// this level over this duration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct WarmthWaypoint {
+    pub trigger: RampTrigger,
+    pub target: WarmthLevel,
+    pub ramp_duration: RampDuration,
+}
+
+/// The warmth axis's schedule.
+///
+/// Either a single [`Manual`](WarmthSchedule::Manual) value (no
+/// scheduled fires), or [`Scheduled`](WarmthSchedule::Scheduled)
+/// waypoints plus a default level.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WarmthSchedule {
+    Manual(WarmthLevel),
+    Scheduled { waypoints: Vec<WarmthWaypoint>, default: WarmthLevel },
+}
+
+impl WarmthSchedule {
+    /// Whether any waypoint needs geolocation.
+    pub fn needs_geolocation(&self) -> bool {
+        match self {
+            WarmthSchedule::Manual(_) => false,
+            WarmthSchedule::Scheduled { waypoints, .. } => {
+                waypoints.iter().any(|waypoint| waypoint.trigger.requires_geolocation())
+            }
+        }
+    }
+
+    /// The level that holds when no waypoint applies.
+    pub fn default_level(&self) -> WarmthLevel {
+        match self {
+            WarmthSchedule::Manual(level) => *level,
+            WarmthSchedule::Scheduled { default, .. } => *default,
+        }
+    }
+}
+
+/// The full warmth-axis configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WarmthAxis {
+    pub schedule: WarmthSchedule,
 }

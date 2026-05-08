@@ -5,8 +5,13 @@
 //! wl-gammarelay-rs's `Brightness` DBus property is a `d` (double)
 //! in `[0.0, 1.0]`; [`BrightnessPercent::as_fraction`] is the
 //! wire form.
+//!
+//! This module also names the axis's scheduling shape:
+//! [`BrightnessWaypoint`], [`BrightnessSchedule`], [`BrightnessAxis`].
 
 use core::fmt;
+
+use crate::time::{RampDuration, RampTrigger};
 
 /// A discrete brightness level on the daemon's standard ladder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -86,8 +91,8 @@ impl fmt::Display for BrightnessLevel {
 /// wl-gammarelay-rs's `Brightness` DBus property is a `d`
 /// (double) in `[0.0, 1.0]`; convert with [`Self::as_fraction`].
 /// Construction clamps to `[MIN, MAX]` = `[0, 100]`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BrightnessPercent(u8);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct BrightnessPercent(pub(crate) u8);
 
 impl BrightnessPercent {
     /// The minimum value (fully dim).
@@ -127,4 +132,43 @@ impl fmt::Display for BrightnessPercent {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}%", self.0)
     }
+}
+
+/// One scheduled brightness waypoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BrightnessWaypoint {
+    pub trigger: RampTrigger,
+    pub target: BrightnessLevel,
+    pub ramp_duration: RampDuration,
+}
+
+/// The brightness axis's schedule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrightnessSchedule {
+    Manual(BrightnessLevel),
+    Scheduled { waypoints: Vec<BrightnessWaypoint>, default: BrightnessLevel },
+}
+
+impl BrightnessSchedule {
+    pub fn needs_geolocation(&self) -> bool {
+        match self {
+            BrightnessSchedule::Manual(_) => false,
+            BrightnessSchedule::Scheduled { waypoints, .. } => {
+                waypoints.iter().any(|waypoint| waypoint.trigger.requires_geolocation())
+            }
+        }
+    }
+
+    pub fn default_level(&self) -> BrightnessLevel {
+        match self {
+            BrightnessSchedule::Manual(level) => *level,
+            BrightnessSchedule::Scheduled { default, .. } => *default,
+        }
+    }
+}
+
+/// The full brightness-axis configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrightnessAxis {
+    pub schedule: BrightnessSchedule,
 }

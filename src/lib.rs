@@ -12,9 +12,13 @@
 //! intent and invariants.
 
 pub mod brightness;
+pub mod config;
 pub mod theme;
+pub mod time;
 pub mod warmth;
 
-pub use brightness::{BrightnessLevel, BrightnessPercent};
-pub use theme::ThemeMode;
-pub use warmth::{KelvinTemperature, WarmthLevel};
+pub use brightness::{BrightnessAxis, BrightnessLevel, BrightnessPercent, BrightnessSchedule, BrightnessWaypoint};
+pub use config::{ApplyCommand, Config};
+pub use theme::{ThemeAxis, ThemeMode, ThemeSchedule, ThemeWaypoint};
+pub use time::{LocalHour, LocalMinute, RampDuration, RampTrigger, SignedMinutes};
+pub use warmth::{KelvinTemperature, WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint};
