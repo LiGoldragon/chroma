@@ -1,0 +1,11 @@
+[package]
+name         = "chroma"
+version      = "0.1.0"
+edition      = "2024"
+rust-version = "1.85"
+license-file = "LICENSE.md"
+repository   = "https://github.com/LiGoldragon/chroma"
+description  = "Chroma — one Rust daemon for theme, warmth, and brightness, controlled via NOTA."
+
+[lib]
+path = "src/lib.rs"
