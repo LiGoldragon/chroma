@@ -6,10 +6,10 @@ fn round_trip_nota<T>(value: &T) -> T
 where
     T: NotaEncode + NotaDecode,
 {
-    let mut encoder = Encoder::nota();
+    let mut encoder = Encoder::new();
     value.encode(&mut encoder).expect("encode");
     let text = encoder.into_string();
-    let mut decoder = Decoder::nota(&text);
+    let mut decoder = Decoder::new(&text);
     T::decode(&mut decoder).expect("decode")
 }
 
@@ -126,7 +126,7 @@ fn ramp_trigger_display() {
 #[test]
 fn ramp_duration_round_trips_minute_aligned_as_minutes() {
     let one_hour = RampDuration::from_minutes(60);
-    let mut encoder = Encoder::nota();
+    let mut encoder = Encoder::new();
     one_hour.encode(&mut encoder).expect("encode");
     assert_eq!(encoder.into_string(), "(Minutes 60)");
     assert_eq!(round_trip_nota(&one_hour), one_hour);
@@ -135,7 +135,7 @@ fn ramp_duration_round_trips_minute_aligned_as_minutes() {
 #[test]
 fn ramp_duration_round_trips_seconds_when_not_minute_aligned() {
     let thirty_seconds = RampDuration::from_seconds(30);
-    let mut encoder = Encoder::nota();
+    let mut encoder = Encoder::new();
     thirty_seconds.encode(&mut encoder).expect("encode");
     assert_eq!(encoder.into_string(), "(Seconds 30)");
     assert_eq!(round_trip_nota(&thirty_seconds), thirty_seconds);
@@ -143,11 +143,11 @@ fn ramp_duration_round_trips_seconds_when_not_minute_aligned() {
 
 #[test]
 fn ramp_duration_decodes_either_form() {
-    let mut decoder_minutes = Decoder::nota("(Minutes 5)");
+    let mut decoder_minutes = Decoder::new("(Minutes 5)");
     let from_minutes = RampDuration::decode(&mut decoder_minutes).expect("decode minutes");
     assert_eq!(from_minutes.as_seconds(), 300);
 
-    let mut decoder_seconds = Decoder::nota("(Seconds 300)");
+    let mut decoder_seconds = Decoder::new("(Seconds 300)");
     let from_seconds = RampDuration::decode(&mut decoder_seconds).expect("decode seconds");
     assert_eq!(from_seconds.as_seconds(), 300);
 

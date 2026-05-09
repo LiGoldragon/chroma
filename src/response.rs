@@ -3,7 +3,7 @@
 //! Travels on the wire as a length-prefixed rkyv archive; the
 //! CLI prints it as a single NOTA record.
 
-use nota_codec::{Decoder, Encoder, NexusVerb, NotaDecode, NotaEncode};
+use nota_codec::{Decoder, Encoder, NotaSum, NotaDecode, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::brightness::BrightnessPercent;
@@ -12,7 +12,7 @@ use crate::theme::ThemeMode;
 use crate::warmth::KelvinTemperature;
 
 /// What the daemon sends back.
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NexusVerb, Debug, Clone, PartialEq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaSum, Debug, Clone, PartialEq)]
 pub enum Response {
     /// The request landed; no payload needed.
     Acked {},
@@ -31,14 +31,14 @@ pub enum Response {
 impl Response {
     /// Render as NOTA for the CLI to print.
     pub fn to_nota(&self) -> Result<String> {
-        let mut encoder = Encoder::nota();
+        let mut encoder = Encoder::new();
         <Self as NotaEncode>::encode(self, &mut encoder)?;
         Ok(encoder.into_string())
     }
 
     /// Parse from a NOTA record (used in tests).
     pub fn from_nota(text: &str) -> Result<Self> {
-        let mut decoder = Decoder::nota(text);
+        let mut decoder = Decoder::new(text);
         let response = <Self as NotaDecode>::decode(&mut decoder)?;
         Ok(response)
     }

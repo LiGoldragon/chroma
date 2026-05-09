@@ -4,7 +4,7 @@
 //! one positional arg). Travels on the wire as a length-prefixed
 //! rkyv archive over the daemon's UDS.
 
-use nota_codec::{Decoder, Encoder, NexusVerb, NotaDecode, NotaEncode};
+use nota_codec::{Decoder, Encoder, NotaSum, NotaDecode, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::brightness::{BrightnessLevel, BrightnessPercent};
@@ -14,7 +14,7 @@ use crate::time::RampDuration;
 use crate::warmth::{KelvinTemperature, WarmthLevel};
 
 /// What the CLI sends to the daemon.
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NexusVerb, Debug, Clone, PartialEq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaSum, Debug, Clone, PartialEq)]
 pub enum Request {
     /// Switch to a theme mode (apply runs the configured shell script).
     SetTheme { mode: ThemeMode },
@@ -58,14 +58,14 @@ pub enum Request {
 impl Request {
     /// Parse a single NOTA record into a typed request.
     pub fn from_nota(text: &str) -> Result<Self> {
-        let mut decoder = Decoder::nota(text);
+        let mut decoder = Decoder::new(text);
         let request = <Self as NotaDecode>::decode(&mut decoder)?;
         Ok(request)
     }
 
     /// Render this request as a NOTA record.
     pub fn to_nota(&self) -> Result<String> {
-        let mut encoder = Encoder::nota();
+        let mut encoder = Encoder::new();
         <Self as NotaEncode>::encode(self, &mut encoder)?;
         Ok(encoder.into_string())
     }
