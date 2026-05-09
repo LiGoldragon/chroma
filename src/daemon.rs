@@ -7,11 +7,11 @@
 //! shared [`DaemonState`] (gamma client + per-axis ramp
 //! handles), and writes a single [`Response`] frame back.
 //!
-//! Per-axis ramps run as detached `tokio::spawn` tasks; the
-//! state holds an [`AbortHandle`] per axis. Any new instant
-//! `SetWarmth` / `SetBrightness`, a fresh `StartWarmthRamp` /
-//! `StartBrightnessRamp`, or an explicit `InterruptWarmth` /
-//! `InterruptBrightness` aborts the in-flight ramp before
+//! Per-axis side effects run as detached `tokio::spawn` tasks
+//! where the effect can outlive the request. The state holds an
+//! [`AbortHandle`] per cancellable axis. Any new `SetTheme`,
+//! instant `SetWarmth` / `SetBrightness`, fresh ramp request, or
+//! explicit interrupt aborts the older in-flight work before
 //! taking effect.
 
 use std::sync::Arc;
@@ -37,6 +37,7 @@ use crate::wire::{read_frame, socket_path, write_frame};
 struct DaemonState {
     theme_applier: ThemeApplier,
     theme: Mutex<ThemeMode>,
+    theme_apply: Mutex<Option<AbortHandle>>,
     gamma: GammaClient,
     warmth_ramp: Mutex<Option<AbortHandle>>,
     brightness_ramp: Mutex<Option<AbortHandle>>,
@@ -47,6 +48,7 @@ impl DaemonState {
         Arc::new(Self {
             theme_applier,
             theme: Mutex::new(ThemeMode::Light),
+            theme_apply: Mutex::new(None),
             gamma,
             warmth_ramp: Mutex::new(None),
             brightness_ramp: Mutex::new(None),
@@ -58,9 +60,24 @@ impl DaemonState {
     }
 
     async fn set_theme(&self, mode: ThemeMode) -> Result<()> {
-        self.theme_applier.apply(mode)?;
+        let process = self.theme_applier.spawn(mode)?;
         *self.theme.lock().await = mode;
+        self.install_theme_apply(process).await;
         Ok(())
+    }
+
+    /// Replace the theme-apply worker, aborting the previous if any.
+    async fn install_theme_apply(&self, process: crate::theme::ThemeApplyProcess) {
+        let handle = tokio::spawn(async move {
+            if let Err(error) = process.wait().await {
+                eprintln!("chroma-daemon theme apply error: {error}");
+            }
+        });
+
+        let mut guard = self.theme_apply.lock().await;
+        if let Some(old) = guard.replace(handle.abort_handle()) {
+            old.abort();
+        }
     }
 
     /// Abort any active warmth ramp. Idempotent.
@@ -158,7 +175,7 @@ async fn dispatch(request: Request, state: &Arc<DaemonState>) -> Response {
         Request::StartWarmthRampKelvin { target, duration } => start_warmth_ramp(state, target, duration).await,
         Request::InterruptWarmth {} => {
             state.cancel_warmth_ramp().await;
-            Response::Acked {}
+            Response::Accepted {}
         }
 
         Request::SetBrightness { level } => instant_brightness(state, level.percent()).await,
@@ -175,7 +192,7 @@ async fn dispatch(request: Request, state: &Arc<DaemonState>) -> Response {
         }
         Request::InterruptBrightness {} => {
             state.cancel_brightness_ramp().await;
-            Response::Acked {}
+            Response::Accepted {}
         }
 
         Request::GetState {} => match (state.gamma.temperature().await, state.gamma.brightness().await) {
@@ -187,38 +204,47 @@ async fn dispatch(request: Request, state: &Arc<DaemonState>) -> Response {
 
 async fn set_theme(state: &Arc<DaemonState>, mode: ThemeMode) -> Response {
     match state.set_theme(mode).await {
-        Ok(()) => Response::Acked {},
+        Ok(()) => Response::Accepted {},
         Err(error) => Response::Error { message: error.to_string() },
     }
 }
 
 async fn instant_warmth(state: &Arc<DaemonState>, kelvin: KelvinTemperature) -> Response {
-    state.cancel_warmth_ramp().await;
-    match state.gamma.set_temperature(kelvin).await {
-        Ok(()) => Response::Acked {},
-        Err(error) => Response::Error { message: error.to_string() },
-    }
+    let owned = Arc::clone(state);
+    let handle = tokio::spawn(async move {
+        if let Err(error) = owned.gamma.set_temperature(kelvin).await {
+            eprintln!("chroma-daemon warmth apply error: {error}");
+        }
+    });
+    state.install_warmth_ramp(handle.abort_handle()).await;
+    Response::Accepted {}
 }
 
 async fn instant_brightness(state: &Arc<DaemonState>, percent: BrightnessPercent) -> Response {
-    state.cancel_brightness_ramp().await;
-    match state.gamma.set_brightness(percent).await {
-        Ok(()) => Response::Acked {},
-        Err(error) => Response::Error { message: error.to_string() },
-    }
+    let owned = Arc::clone(state);
+    let handle = tokio::spawn(async move {
+        if let Err(error) = owned.gamma.set_brightness(percent).await {
+            eprintln!("chroma-daemon brightness apply error: {error}");
+        }
+    });
+    state.install_brightness_ramp(handle.abort_handle()).await;
+    Response::Accepted {}
 }
 
 async fn start_warmth_ramp(state: &Arc<DaemonState>, target: KelvinTemperature, duration: RampDuration) -> Response {
-    let from = match state.gamma.temperature().await {
-        Ok(kelvin) => kelvin,
-        Err(error) => return Response::Error { message: error.to_string() },
-    };
     let owned = Arc::clone(state);
     let handle = tokio::spawn(async move {
+        let from = match owned.gamma.temperature().await {
+            Ok(kelvin) => kelvin,
+            Err(error) => {
+                eprintln!("chroma-daemon warmth ramp read error: {error}");
+                return;
+            }
+        };
         run_warmth_ramp(&owned, from, target, duration).await;
     });
     state.install_warmth_ramp(handle.abort_handle()).await;
-    Response::Acked {}
+    Response::Accepted {}
 }
 
 async fn start_brightness_ramp(
@@ -226,16 +252,19 @@ async fn start_brightness_ramp(
     target: BrightnessPercent,
     duration: RampDuration,
 ) -> Response {
-    let from = match state.gamma.brightness().await {
-        Ok(percent) => percent,
-        Err(error) => return Response::Error { message: error.to_string() },
-    };
     let owned = Arc::clone(state);
     let handle = tokio::spawn(async move {
+        let from = match owned.gamma.brightness().await {
+            Ok(percent) => percent,
+            Err(error) => {
+                eprintln!("chroma-daemon brightness ramp read error: {error}");
+                return;
+            }
+        };
         run_brightness_ramp(&owned, from, target, duration).await;
     });
     state.install_brightness_ramp(handle.abort_handle()).await;
-    Response::Acked {}
+    Response::Accepted {}
 }
 
 async fn run_warmth_ramp(

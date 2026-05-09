@@ -1,17 +1,20 @@
 //! `ThemeMode` — the desktop's colour-scheme axis.
 //!
 //! Two values: [`ThemeMode::Dark`] and [`ThemeMode::Light`].
-//! Theme switches are always instant; the applier invokes the
+//! Theme switches are accepted instantly; the daemon spawns the
 //! configured shell script with the lowercase variant name as a
-//! single positional argument.
+//! single positional argument and waits for completion outside
+//! the request path.
 //!
 //! This module also names the axis's scheduling shape:
 //! [`ThemeWaypoint`], [`ThemeSchedule`], [`ThemeAxis`].
 
 use core::fmt;
+use std::process::Stdio;
 
 use nota_codec::NotaEnum;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use tokio::process::Child;
 
 use crate::config::ApplyCommand;
 use crate::error::{Error, Result};
@@ -108,15 +111,45 @@ impl ThemeApplier {
         Self { apply_command }
     }
 
-    pub fn apply(&self, mode: ThemeMode) -> Result<()> {
-        let output =
-            std::process::Command::new(self.apply_command.as_path()).arg(mode.as_str()).output().map_err(|source| {
-                Error::ThemeApply {
-                    command: self.apply_command.to_string(),
-                    mode: mode.to_string(),
-                    message: source.to_string(),
-                }
+    pub fn spawn(&self, mode: ThemeMode) -> Result<ThemeApplyProcess> {
+        let command = self.apply_command.to_string();
+        let child = tokio::process::Command::new(self.apply_command.as_path())
+            .arg(mode.as_str())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|source| Error::ThemeApply {
+                command: command.clone(),
+                mode: mode.to_string(),
+                message: source.to_string(),
             })?;
+
+        Ok(ThemeApplyProcess { child, command, mode })
+    }
+
+    pub async fn apply(&self, mode: ThemeMode) -> Result<()> {
+        self.spawn(mode)?.wait().await
+    }
+}
+
+/// A spawned theme application process.
+///
+/// Dropping this value kills the process, so aborted daemon tasks
+/// cannot leave older theme applications racing newer requests.
+pub struct ThemeApplyProcess {
+    child: Child,
+    command: String,
+    mode: ThemeMode,
+}
+
+impl ThemeApplyProcess {
+    pub async fn wait(self) -> Result<()> {
+        let output = self.child.wait_with_output().await.map_err(|source| Error::ThemeApply {
+            command: self.command.clone(),
+            mode: self.mode.to_string(),
+            message: source.to_string(),
+        })?;
 
         if output.status.success() {
             return Ok(());
@@ -132,6 +165,6 @@ impl ThemeApplier {
             format!("exit status {}", output.status)
         };
 
-        Err(Error::ThemeApply { command: self.apply_command.to_string(), mode: mode.to_string(), message })
+        Err(Error::ThemeApply { command: self.command, mode: self.mode.to_string(), message })
     }
 }

@@ -55,9 +55,13 @@ Each axis has:
 - its own redb table (one row, current value)
 - its own CLI verbs (`SetTheme`, `SetWarmth`, `StepBrightnessUp`, …)
 
-Theme is instant (no ramps). Warmth and brightness support both
-instant (`SetWarmth`, `SetBrightness`) and gradual
-(`StartWarmthRamp`, `StartBrightnessRamp`) transitions.
+Theme has no ramp, but its external apply script is always
+spawned outside the CLI request path. `SetTheme` records the
+requested mode, starts a latest-wins apply worker, and returns
+`(Accepted)` immediately after the process has spawned. Warmth
+and brightness support both instant (`SetWarmth`,
+`SetBrightness`) and gradual (`StartWarmthRamp`,
+`StartBrightnessRamp`) transitions.
 
 ## Actor topology
 
@@ -92,13 +96,16 @@ Daemon ↔ CLI is the **signal pattern** documented in
   `$XDG_RUNTIME_DIR/chroma.sock`
 - Framing: 4-byte big-endian length, then the rkyv archive
 - Request: `Request` enum (one variant per CLI verb)
-- Reply: `Response` enum (`State(VisualState)`, `Acked`,
+- Reply: `Response` enum (`State(VisualState)`, `Accepted`,
   `Error(Error)`)
 - Pairing: by position on the connection (FIFO)
 
 The CLI binary is a thin signal client: parse NOTA argv into a
 typed request → archive with rkyv → length-prefix → send → read
-reply → bytecheck-validate → print as NOTA.
+reply → bytecheck-validate → print as NOTA. Every mutating
+request returns `(Accepted)` after the daemon accepts ownership
+of the change; theme scripts, instant gamma writes, and ramp
+setup/read work continue asynchronously.
 
 ## Configuration
 

@@ -14,8 +14,8 @@ use crate::warmth::KelvinTemperature;
 /// What the daemon sends back.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaSum, Debug, Clone, PartialEq)]
 pub enum Response {
-    /// The request landed; no payload needed.
-    Acked {},
+    /// The daemon accepted the request; the side effect may still be running.
+    Accepted {},
     /// The current theme.
     Theme { mode: ThemeMode },
     /// The current warmth, as a kelvin reading.

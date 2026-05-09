@@ -25,8 +25,10 @@ report is
 - **Theme apply boundary.** `chroma` invokes a configured apply
   command (a home-manager-built shell script) for theme
   switches. The daemon stays NixOS-agnostic; the apply script
-  stays NixOS-specific. Don't fold dconf / GTK ini / OSC /
-  emacsclient logic into the daemon.
+  stays NixOS-specific. `SetTheme` returns `(Accepted)` after
+  spawning the apply work; do not make CLI requests wait on
+  desktop mutation. Don't fold dconf / GTK ini / terminal OSC
+  startup / emacsclient logic into the daemon.
 - **Push-not-poll throughout.** Geoclue location pushes via
   zbus signal; deadlines push via `tokio::time::sleep_until`
   (timerfd-backed); inotify pushes config reloads; UDS frames
