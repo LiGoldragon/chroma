@@ -4,7 +4,7 @@
 //! one positional arg). Travels on the wire as a length-prefixed
 //! rkyv archive over the daemon's UDS.
 
-use nota_codec::{Decoder, Encoder, NotaSum, NotaDecode, NotaEncode};
+use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaSum};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::brightness::{BrightnessLevel, BrightnessPercent};

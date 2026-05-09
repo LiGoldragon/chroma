@@ -22,11 +22,12 @@ use tokio::task::AbortHandle;
 use tokio::time::{Duration, Instant, MissedTickBehavior, interval};
 
 use crate::brightness::BrightnessPercent;
+use crate::config::ConfigFile;
 use crate::error::Result;
 use crate::gamma::GammaClient;
 use crate::request::Request;
 use crate::response::Response;
-use crate::theme::ThemeMode;
+use crate::theme::{ThemeApplier, ThemeMode};
 use crate::time::RampDuration;
 use crate::warmth::KelvinTemperature;
 use crate::wire::{read_frame, socket_path, write_frame};
@@ -34,18 +35,32 @@ use crate::wire::{read_frame, socket_path, write_frame};
 /// Shared per-daemon state. Held behind an `Arc` so connection
 /// tasks and ramp tasks can both reach it.
 struct DaemonState {
+    theme_applier: ThemeApplier,
+    theme: Mutex<ThemeMode>,
     gamma: GammaClient,
     warmth_ramp: Mutex<Option<AbortHandle>>,
     brightness_ramp: Mutex<Option<AbortHandle>>,
 }
 
 impl DaemonState {
-    fn new(gamma: GammaClient) -> Arc<Self> {
+    fn new(theme_applier: ThemeApplier, gamma: GammaClient) -> Arc<Self> {
         Arc::new(Self {
+            theme_applier,
+            theme: Mutex::new(ThemeMode::Light),
             gamma,
             warmth_ramp: Mutex::new(None),
             brightness_ramp: Mutex::new(None),
         })
+    }
+
+    async fn theme(&self) -> ThemeMode {
+        *self.theme.lock().await
+    }
+
+    async fn set_theme(&self, mode: ThemeMode) -> Result<()> {
+        self.theme_applier.apply(mode)?;
+        *self.theme.lock().await = mode;
+        Ok(())
     }
 
     /// Abort any active warmth ramp. Idempotent.
@@ -88,8 +103,9 @@ pub async fn run() -> Result<()> {
         std::fs::remove_file(&path)?;
     }
     let listener = UnixListener::bind(&path)?;
+    let theme_applier = ThemeApplier::from_apply_command(ConfigFile::from_default_locations()?.theme_apply_command()?);
     let gamma = GammaClient::connect().await?;
-    let state = DaemonState::new(gamma);
+    let state = DaemonState::new(theme_applier, gamma);
     eprintln!("chroma-daemon listening on {}", path.display());
 
     let shutdown = tokio::signal::ctrl_c();
@@ -129,10 +145,8 @@ async fn serve_connection(mut stream: UnixStream, state: &Arc<DaemonState>) -> R
 
 async fn dispatch(request: Request, state: &Arc<DaemonState>) -> Response {
     match request {
-        Request::SetTheme { mode: _ } => Response::Error {
-            message: "SetTheme is not yet implemented; see report 28 for the apply-command boundary".into(),
-        },
-        Request::GetTheme {} => Response::Theme { mode: ThemeMode::Light },
+        Request::SetTheme { mode } => set_theme(state, mode).await,
+        Request::GetTheme {} => Response::Theme { mode: state.theme().await },
 
         Request::SetWarmth { level } => instant_warmth(state, level.kelvin()).await,
         Request::SetWarmthKelvin { kelvin } => instant_warmth(state, kelvin).await,
@@ -165,9 +179,16 @@ async fn dispatch(request: Request, state: &Arc<DaemonState>) -> Response {
         }
 
         Request::GetState {} => match (state.gamma.temperature().await, state.gamma.brightness().await) {
-            (Ok(kelvin), Ok(percent)) => Response::State { theme: ThemeMode::Light, kelvin, percent },
+            (Ok(kelvin), Ok(percent)) => Response::State { theme: state.theme().await, kelvin, percent },
             (Err(error), _) | (_, Err(error)) => Response::Error { message: error.to_string() },
         },
+    }
+}
+
+async fn set_theme(state: &Arc<DaemonState>, mode: ThemeMode) -> Response {
+    match state.set_theme(mode).await {
+        Ok(()) => Response::Acked {},
+        Err(error) => Response::Error { message: error.to_string() },
     }
 }
 

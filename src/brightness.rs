@@ -17,13 +17,12 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use crate::time::{RampDuration, RampTrigger};
 
 /// A discrete brightness level on the daemon's standard ladder.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, NotaEnum, Archive, RkyvSerialize, RkyvDeserialize,
-)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, NotaEnum, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum BrightnessLevel {
     Dim,
     Dimmer,
     Mid,
+    #[default]
     Bright,
     Brighter,
     Brightest,
@@ -76,12 +75,6 @@ impl BrightnessLevel {
             BrightnessLevel::Brighter => "brighter",
             BrightnessLevel::Brightest => "brightest",
         }
-    }
-}
-
-impl Default for BrightnessLevel {
-    fn default() -> Self {
-        BrightnessLevel::Bright
     }
 }
 

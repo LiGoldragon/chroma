@@ -3,9 +3,7 @@
 //! Every variant must survive both wire formats:
 //! NOTA (the CLI's argv-parse path) and rkyv (the daemon's UDS frame).
 
-use chroma::{
-    BrightnessLevel, BrightnessPercent, KelvinTemperature, RampDuration, Request, ThemeMode, WarmthLevel,
-};
+use chroma::{BrightnessLevel, BrightnessPercent, KelvinTemperature, RampDuration, Request, ThemeMode, WarmthLevel};
 
 fn round_trip_nota(text: &str) -> Request {
     let request = Request::from_nota(text).expect("nota decode");

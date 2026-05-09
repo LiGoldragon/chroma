@@ -24,6 +24,7 @@
         commonArgs = {
           inherit src;
           strictDeps = true;
+          CHROMA_TEST_SHELL = "${pkgs.bash}/bin/bash";
         };
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
       in

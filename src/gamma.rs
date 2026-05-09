@@ -12,12 +12,7 @@ use crate::brightness::BrightnessPercent;
 use crate::error::Result;
 use crate::warmth::KelvinTemperature;
 
-#[proxy(
-    interface = "rs.wl.gammarelay",
-    default_service = "rs.wl-gammarelay",
-    default_path = "/",
-    gen_blocking = false
-)]
+#[proxy(interface = "rs.wl.gammarelay", default_service = "rs.wl-gammarelay", default_path = "/", gen_blocking = false)]
 pub trait GammaRelay {
     #[zbus(property)]
     fn temperature(&self) -> zbus::Result<u16>;

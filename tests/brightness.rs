@@ -80,12 +80,7 @@ fn dimmer_walks_the_ladder_down() {
 
 #[test]
 fn brighter_and_dimmer_are_almost_inverse() {
-    for level in [
-        BrightnessLevel::Dimmer,
-        BrightnessLevel::Mid,
-        BrightnessLevel::Bright,
-        BrightnessLevel::Brighter,
-    ] {
+    for level in [BrightnessLevel::Dimmer, BrightnessLevel::Mid, BrightnessLevel::Bright, BrightnessLevel::Brighter] {
         assert_eq!(level.brighter().dimmer(), level);
         assert_eq!(level.dimmer().brighter(), level);
     }

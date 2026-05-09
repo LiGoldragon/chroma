@@ -18,12 +18,11 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use crate::time::{RampDuration, RampTrigger};
 
 /// A discrete warmth level on the daemon's standard ladder.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, NotaEnum, Archive, RkyvSerialize, RkyvDeserialize,
-)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, NotaEnum, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum WarmthLevel {
     Cold,
     Cool,
+    #[default]
     Neutral,
     Warm,
     Warmer,
@@ -77,12 +76,6 @@ impl WarmthLevel {
             WarmthLevel::Warmer => "warmer",
             WarmthLevel::Warmest => "warmest",
         }
-    }
-}
-
-impl Default for WarmthLevel {
-    fn default() -> Self {
-        WarmthLevel::Neutral
     }
 }
 

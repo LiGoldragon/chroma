@@ -23,6 +23,10 @@ pub enum Error {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 
+    /// Configuration is missing or malformed.
+    #[error("config: {message}")]
+    Config { message: String },
+
     /// DBus error from a wl-gammarelay-rs / geoclue method call.
     #[error("dbus: {0}")]
     Dbus(#[from] zbus::Error),
@@ -30,6 +34,10 @@ pub enum Error {
     /// The daemon refused a request — see [`Self::message`].
     #[error("daemon: {message}")]
     Daemon { message: String },
+
+    /// The configured theme apply command failed.
+    #[error("theme apply command {command} failed for {mode}: {message}")]
+    ThemeApply { command: String, mode: String, message: String },
 }
 
 /// Crate-local result alias.

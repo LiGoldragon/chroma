@@ -80,12 +80,7 @@ fn cooler_walks_the_ladder_down() {
 
 #[test]
 fn warmer_and_cooler_are_almost_inverse() {
-    for level in [
-        WarmthLevel::Cool,
-        WarmthLevel::Neutral,
-        WarmthLevel::Warm,
-        WarmthLevel::Warmer,
-    ] {
+    for level in [WarmthLevel::Cool, WarmthLevel::Neutral, WarmthLevel::Warm, WarmthLevel::Warmer] {
         assert_eq!(level.warmer().cooler(), level);
         assert_eq!(level.cooler().warmer(), level);
     }
@@ -168,9 +163,14 @@ fn levels_match_canonical_kelvin() {
 
 #[test]
 fn nota_round_trips_every_level() {
-    for level in
-        [WarmthLevel::Cold, WarmthLevel::Cool, WarmthLevel::Neutral, WarmthLevel::Warm, WarmthLevel::Warmer, WarmthLevel::Warmest]
-    {
+    for level in [
+        WarmthLevel::Cold,
+        WarmthLevel::Cool,
+        WarmthLevel::Neutral,
+        WarmthLevel::Warm,
+        WarmthLevel::Warmer,
+        WarmthLevel::Warmest,
+    ] {
         assert_eq!(round_trip_nota(&level), level);
     }
 }

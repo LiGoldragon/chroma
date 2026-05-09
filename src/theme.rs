@@ -14,12 +14,11 @@ use nota_codec::NotaEnum;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::config::ApplyCommand;
+use crate::error::{Error, Result};
 use crate::time::RampTrigger;
 
 /// The active colour scheme.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, NotaEnum, Archive, RkyvSerialize, RkyvDeserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, NotaEnum, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum ThemeMode {
     Dark,
     Light,
@@ -96,4 +95,43 @@ pub struct ThemeAxis {
     pub apply_command: ApplyCommand,
     /// The theme schedule.
     pub schedule: ThemeSchedule,
+}
+
+/// Applies theme changes through the configured external script.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThemeApplier {
+    apply_command: ApplyCommand,
+}
+
+impl ThemeApplier {
+    pub fn from_apply_command(apply_command: ApplyCommand) -> Self {
+        Self { apply_command }
+    }
+
+    pub fn apply(&self, mode: ThemeMode) -> Result<()> {
+        let output =
+            std::process::Command::new(self.apply_command.as_path()).arg(mode.as_str()).output().map_err(|source| {
+                Error::ThemeApply {
+                    command: self.apply_command.to_string(),
+                    mode: mode.to_string(),
+                    message: source.to_string(),
+                }
+            })?;
+
+        if output.status.success() {
+            return Ok(());
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let message = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("exit status {}", output.status)
+        };
+
+        Err(Error::ThemeApply { command: self.apply_command.to_string(), mode: mode.to_string(), message })
+    }
 }

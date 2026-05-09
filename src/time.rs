@@ -53,11 +53,7 @@ impl fmt::Display for RampDuration {
         if total >= 60 {
             let minutes = total / 60;
             let seconds = total % 60;
-            if seconds == 0 {
-                write!(formatter, "{minutes}m")
-            } else {
-                write!(formatter, "{minutes}m{seconds}s")
-            }
+            if seconds == 0 { write!(formatter, "{minutes}m") } else { write!(formatter, "{minutes}m{seconds}s") }
         } else {
             write!(formatter, "{total}s")
         }
@@ -98,10 +94,7 @@ impl NotaDecode for RampDuration {
                 decoder.expect_record_end()?;
                 Ok(Self::from_seconds(seconds))
             }
-            other => Err(nota_codec::Error::UnknownKindForVerb {
-                verb: "RampDuration",
-                got: other.to_string(),
-            }),
+            other => Err(nota_codec::Error::UnknownKindForVerb { verb: "RampDuration", got: other.to_string() }),
         }
     }
 }

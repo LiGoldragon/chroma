@@ -3,7 +3,7 @@
 //! Travels on the wire as a length-prefixed rkyv archive; the
 //! CLI prints it as a single NOTA record.
 
-use nota_codec::{Decoder, Encoder, NotaSum, NotaDecode, NotaEncode};
+use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaSum};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::brightness::BrightnessPercent;
