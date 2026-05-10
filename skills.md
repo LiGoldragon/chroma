@@ -38,19 +38,25 @@ report, not a pull request.
    directly. There is no configured apply command, no shell
    script boundary, and no retained legacy target schema.
 
-2. **rkyv on the wire, NOTA at the human boundary.** Daemon ↔
+2. **No global live-terminal fanout.** The daemon never scans
+   `/dev/pts`, never writes OSC sequences to other terminals,
+   and never triggers a global terminal reload file. Running
+   terminal updates are caller-local; other terminals pick up
+   state through their own startup/integration path.
+
+3. **rkyv on the wire, NOTA at the human boundary.** Daemon ↔
    CLI is the signal pattern (length-prefixed rkyv frames over
    UDS). NOTA appears only on the CLI argv, the disk config,
    and the printed reply. The daemon never re-parses NOTA from
    the CLI request frame.
 
-3. **State lives in redb + rkyv, not ad-hoc data formats.** No
+4. **State lives in redb + rkyv, not ad-hoc data formats.** No
    JSON sidecars and no YAML/YML Chroma inputs. Terminal helper
    files may exist only as integration outputs for tools that
    cannot read the daemon state directly; they are not Chroma's
    source of truth.
 
-4. **Push, not poll.** Schedule fires are `tokio::time::sleep_until`
+5. **Push, not poll.** Schedule fires are `tokio::time::sleep_until`
    deadlines (timerfd-backed). Geoclue is a zbus signal
    subscription. Config reload is inotify. CLI commands are UDS
    frames. Property writes are zbus method calls. There is no
@@ -59,17 +65,17 @@ report, not a pull request.
    backpressure-aware pacing, deadline timers) are the only
    exceptions.
 
-5. **Three axes, perfect specificity.** Each axis has its own
+6. **Three axes, perfect specificity.** Each axis has its own
    typed level (`ThemeMode`, `WarmthLevel`, `BrightnessLevel`),
    its own applier actor, its own table row in redb, its own
    CLI verbs. There is no polymorphic `Set(axis, value)` enum
    that mixes concerns.
 
-6. **The supervisor is the only `spawn` site.** Every other
+7. **The supervisor is the only `spawn` site.** Every other
    actor is `spawn_linked` from its parent's `pre_start`.
    Failures escalate.
 
-7. **No `Arc<Mutex<T>>` between actors.** State is owned;
+8. **No `Arc<Mutex<T>>` between actors.** State is owned;
    communication is messages.
 
 ---

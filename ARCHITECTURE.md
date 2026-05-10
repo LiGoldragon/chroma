@@ -56,7 +56,11 @@ Each axis has:
 Theme has no ramp. `SetTheme` records the requested mode,
 enqueues it to one latest-wins actor per theme concern, and
 returns `(Accepted)` immediately after those actors own the
-message. Warmth and brightness support both instant (`SetWarmth`,
+message. The terminal concern persists state for future shells
+only; it never scans PTYs, writes to other terminals, or forces a
+global terminal reload. A manual CLI call may write OSC only to
+its own stdout after the daemon accepts the request. Warmth and
+brightness support both instant (`SetWarmth`,
 `SetBrightness`) and gradual (`StartWarmthRamp`,
 `StartBrightnessRamp`) transitions.
 
@@ -168,6 +172,17 @@ version-skew guard at boot hard-fails on mismatch.
 JSON / serde appears nowhere in the daemon. The only text
 format accepted as Chroma input is NOTA (config + CLI); all
 other daemon-owned bytes are rkyv archives.
+
+## Forbidden Pattern: Global Live-Terminal Fanout
+
+Do not update running terminals by enumerating `/dev/pts`, by
+touching a reload file watched by every terminal window, or by
+any other daemon-side fanout to "all terminals". That shape
+turns one user's theme command into a global terminal event and
+can freeze unrelated agent panes. Terminal live updates are
+local to the client that initiated the request; all other
+terminals converge when they start a new shell or when their own
+terminal-local integration asks for an update.
 
 ## Out of scope (for the first slice)
 

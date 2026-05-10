@@ -26,3 +26,16 @@ Configuration and palette data inputs are NOTA. YAML/YML inputs
 are invalid at the Chroma boundary.
 
 Test: `hc_chroma_004_yaml_data_inputs_are_rejected_in_favor_of_nota`.
+
+## HC-CHROMA-004 — No Global Live-Terminal Fanout
+
+Chroma may persist terminal theme state for future shells. It
+must not scan `/dev/pts`, write OSC sequences to other terminals,
+or trigger global terminal reload files from the daemon. A live
+terminal update is caller-local only: the CLI may write OSC to
+its own stdout after a successful `SetTheme`.
+
+Tests:
+
+- `hc_chroma_005_terminal_concern_does_not_broadcast_to_pty_inventory`
+- `hc_chroma_006_daemon_does_not_trigger_global_terminal_reload_files`

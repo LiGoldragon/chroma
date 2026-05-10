@@ -29,6 +29,10 @@ report is
   wait on desktop mutation. Do not add configured apply
   commands, shell script boundaries, or retained legacy target
   schemas.
+- **No global live-terminal fanout.** The daemon must not scan
+  `/dev/pts`, write OSC to other terminals, or touch reload
+  files watched by every terminal window. A live terminal update
+  is caller-local only.
 - **Push-not-poll throughout.** Geoclue location pushes via
   zbus signal; deadlines push via `tokio::time::sleep_until`
   (timerfd-backed); inotify pushes config reloads; UDS frames

@@ -8,11 +8,9 @@ use core::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use nota_codec::NotaEnum;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::AbortHandle;
 use tokio::time::{Duration, timeout};
@@ -371,36 +369,11 @@ impl TerminalThemeConcern {
         let state_dir = state_home()?.join("chroma");
         tokio::fs::create_dir_all(&state_dir).await?;
         tokio::fs::write(state_dir.join("current-mode"), format!("{}\n", self.mode)).await?;
-        tokio::fs::write(state_dir.join("wezterm-reload"), format!("{}\n", now_nanos())).await?;
         tokio::fs::write(
             state_dir.join("fzf-theme.sh"),
             format!("export FZF_DEFAULT_OPTS=\"$FZF_DEFAULT_OPTS {}\"\n", self.palette.fzf_options()),
         )
         .await?;
-        Self::broadcast_terminal_colors(self.palette.terminal_osc_sequence()).await
-    }
-
-    async fn broadcast_terminal_colors(sequence: String) -> Result<()> {
-        let mut entries = match tokio::fs::read_dir("/dev/pts").await {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error.into()),
-        };
-
-        while let Some(entry) = entries.next_entry().await? {
-            if !entry.file_name().to_string_lossy().chars().all(|character| character.is_ascii_digit()) {
-                continue;
-            }
-            let path = entry.path();
-            let sequence = sequence.clone();
-            tokio::spawn(async move {
-                let _ = timeout(Duration::from_millis(200), async move {
-                    let mut file = tokio::fs::OpenOptions::new().write(true).open(path).await?;
-                    file.write_all(sequence.as_bytes()).await
-                })
-                .await;
-            });
-        }
         Ok(())
     }
 }
@@ -554,8 +527,4 @@ fn config_home() -> Result<PathBuf> {
 
 fn home_directory() -> Result<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| Error::Config { message: "HOME is not set".into() })
-}
-
-fn now_nanos() -> u128 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or_default()
 }
