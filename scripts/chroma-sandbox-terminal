@@ -117,7 +117,65 @@ if [[ -z "${CHROMA_SANDBOX_PREPARED:-}" ]]; then
   export CHROMA_SANDBOX_PARENT_XDG_RUNTIME_DIR="$parent_runtime"
   export CHROMA_SANDBOX_PARENT_WAYLAND_DISPLAY="$parent_wayland"
 
-  cat > "$CHROMA_CONFIG" <<'NOTA'
+  cat > "$XDG_CONFIG_HOME/ghostty/dark-template.ghostty" <<'GHOSTTY_DARK'
+font-family = IosevkaTerm Nerd Font
+font-size = 14
+window-decoration = false
+gtk-titlebar = false
+window-theme = ghostty
+background = #000000
+foreground = #d0d0d0
+cursor-color = #d0d0d0
+selection-background = #2d2d2d
+selection-foreground = #d0d0d0
+palette = 0=#000000
+palette = 1=#ff0066
+palette = 2=#00cc44
+palette = 3=#f5c000
+palette = 4=#e040a0
+palette = 5=#bb44ee
+palette = 6=#cc44ff
+palette = 7=#d0d0d0
+palette = 8=#505050
+palette = 9=#ff0066
+palette = 10=#00cc44
+palette = 11=#f5c000
+palette = 12=#e040a0
+palette = 13=#bb44ee
+palette = 14=#cc44ff
+palette = 15=#ffffff
+GHOSTTY_DARK
+
+  cat > "$XDG_CONFIG_HOME/ghostty/light-template.ghostty" <<'GHOSTTY_LIGHT'
+font-family = IosevkaTerm Nerd Font
+font-size = 14
+window-decoration = false
+gtk-titlebar = false
+window-theme = ghostty
+background = #faf5f0
+foreground = #3d3530
+cursor-color = #3d3530
+selection-background = #ddd5ce
+selection-foreground = #3d3530
+palette = 0=#faf5f0
+palette = 1=#cc0044
+palette = 2=#1a8a30
+palette = 3=#b89000
+palette = 4=#b03080
+palette = 5=#8822bb
+palette = 6=#9930cc
+palette = 7=#3d3530
+palette = 8=#887a70
+palette = 9=#cc0044
+palette = 10=#1a8a30
+palette = 11=#b89000
+palette = 12=#b03080
+palette = 13=#8822bb
+palette = 14=#9930cc
+palette = 15=#1a1510
+GHOSTTY_LIGHT
+
+  cat > "$CHROMA_CONFIG" <<NOTA
 (Config
   (Theme
     (Concerns Terminal Ghostty)
@@ -158,6 +216,9 @@ if [[ -z "${CHROMA_SANDBOX_PREPARED:-}" ]]; then
         (Base0F "#cc3355")))
     (Adapters)
     (FontPointSize 14)
+    (GhosttyConfigTemplates
+      (Dark "$XDG_CONFIG_HOME/ghostty/dark-template.ghostty")
+      (Light "$XDG_CONFIG_HOME/ghostty/light-template.ghostty"))
     (Schedule (Manual Light)))
   (Warmth (Schedule (Manual Neutral)))
   (Brightness (Schedule (Manual Bright))))

@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use crate::brightness::{BrightnessAxis, BrightnessLevel, BrightnessSchedule, BrightnessWaypoint};
 use crate::error::{Error, Result};
 use crate::theme::{
-    ThemeAdapters, ThemeAxis, ThemeConcern, ThemeMode, ThemePalette, ThemePalettes, ThemeSchedule, ThemeWaypoint,
+    GhosttyConfigTemplates, ThemeAdapters, ThemeAxis, ThemeConcern, ThemeMode, ThemePalette, ThemePalettes,
+    ThemeSchedule, ThemeWaypoint,
 };
 use crate::time::{LocalHour, LocalMinute, RampDuration, RampTrigger, SignedMinutes};
 use crate::warmth::{WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint};
@@ -275,11 +276,19 @@ impl ConfigDocument {
 }
 
 fn parse_theme_axis(nodes: &[ConfigNode]) -> Result<ThemeAxis> {
+    let concerns = parse_theme_concerns(required_record(nodes, "Concerns")?)?;
+    let ghostty_config_templates = parse_ghostty_config_templates(optional_record(nodes, "GhosttyConfigTemplates")?)?;
+    if concerns.contains(&ThemeConcern::Ghostty) && ghostty_config_templates.is_none() {
+        return Err(Error::Config {
+            message: "Ghostty concern requires a GhosttyConfigTemplates record with Dark and Light paths".into(),
+        });
+    }
     Ok(ThemeAxis {
-        concerns: parse_theme_concerns(required_record(nodes, "Concerns")?)?,
+        concerns,
         palettes: parse_theme_palettes(required_record(nodes, "Palettes")?)?,
         adapters: parse_theme_adapters(optional_record(nodes, "Adapters")?)?,
         font_point_size: parse_font_point_size(optional_record(nodes, "FontPointSize")?)?,
+        ghostty_config_templates,
         schedule: parse_theme_schedule_ast(required_record(nodes, "Schedule")?)?,
     })
 }
@@ -336,6 +345,16 @@ fn parse_theme_adapters(nodes: Option<&[ConfigNode]>) -> Result<ThemeAdapters> {
         }
     }
     Ok(adapters)
+}
+
+fn parse_ghostty_config_templates(nodes: Option<&[ConfigNode]>) -> Result<Option<GhosttyConfigTemplates>> {
+    let Some(nodes) = nodes else {
+        return Ok(None);
+    };
+    Ok(Some(GhosttyConfigTemplates {
+        dark: PathBuf::from(required_atom(required_record(nodes, "Dark")?, "Dark")?),
+        light: PathBuf::from(required_atom(required_record(nodes, "Light")?, "Light")?),
+    }))
 }
 
 fn parse_font_point_size(nodes: Option<&[ConfigNode]>) -> Result<u8> {

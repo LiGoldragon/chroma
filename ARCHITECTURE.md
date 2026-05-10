@@ -59,12 +59,14 @@ returns `(Accepted)` immediately after those actors own the
 message. The terminal concern persists state for future shells
 only; it never scans PTYs, writes to other terminals, or forces a
 global terminal reload. Ghostty is a native application concern:
-Chroma writes Ghostty's config file, then sends the running
-Ghostty application one bounded `org.gtk.Actions` `reload-config`
-DBus action so existing Ghostty windows reload their own config.
-The CLI does not write live terminal palette sequences. Non-Ghostty
-terminals converge only through a future explicit per-window
-protocol, or when their own startup path reads the persisted state.
+Chroma reads the complete Ghostty config template for the target
+mode, copies it to the mutable `config.ghostty` file under the
+user config directory, then sends the running Ghostty application
+one bounded `org.gtk.Actions` `reload-config` DBus action so
+existing Ghostty windows reload their own config. The CLI does not
+write live terminal palette sequences. Non-Ghostty terminals
+converge only through a future explicit per-window protocol, or
+when their own startup path reads the persisted state.
 Warmth and brightness support both instant (`SetWarmth`,
 `SetBrightness`) and gradual (`StartWarmthRamp`,
 `StartBrightnessRamp`) transitions.
@@ -130,6 +132,9 @@ on inotify push. Parses into a typed `Config`:
     (Adapters
       (Dconf <path>)
       (Emacsclient <path>))
+    (GhosttyConfigTemplates
+      (Dark <path-to-complete-dark-ghostty-config>)
+      (Light <path-to-complete-light-ghostty-config>))
     (Schedule …))
   (Warmth      (Schedule …))
   (Brightness  (Schedule …)))
@@ -142,7 +147,10 @@ The geoclue read runs iff any axis uses a twilight trigger; if
 geolocation is unavailable, the schedule actor retries on a
 bounded delayed message instead of running a polling loop.
 Data-format inputs at the Chroma boundary are NOTA; YAML and YML
-inputs are rejected.
+inputs are rejected. `GhosttyConfigTemplates` paths are references
+to complete Ghostty-native config files produced by the host
+profile; Chroma does not parse them as palette data and does not
+write back to those source paths.
 
 ## Persistence
 
@@ -169,6 +177,8 @@ version-skew guard at boot hard-fails on mismatch.
 | Daemon ↔ CLI | rkyv-archived `Request` / `Response`, length-prefixed |
 | Daemon ↔ disk (state) | rkyv values inside redb tables |
 | Daemon ↔ disk (config + palettes) | NOTA text record (`Config`) |
+| Daemon ↔ Ghostty config templates | read-only Ghostty-native text files, copied byte-for-byte |
+| Daemon ↔ mutable Ghostty config | `$XDG_CONFIG_HOME/ghostty/config.ghostty` |
 | Daemon ↔ wl-gammarelay-rs | zbus property writes (`Temperature` u16, `Brightness` f64) |
 | Daemon ↔ geoclue2 | bounded zbus location read |
 | Daemon ↔ theme concerns | typed Rust values; no apply-command schema |
@@ -191,10 +201,14 @@ exists, terminals converge when they start a new shell or when
 their own terminal-local integration asks for an update.
 
 Ghostty is the named exception because it exposes a native
-application action for config reload. Chroma sends that single
-Ghostty-owned DBus action after writing `config.ghostty`; it does
-not enumerate Ghostty windows or panes and does not emit OSC into
-their PTYs.
+application action for config reload. Chroma reads a complete
+read-only template, copies it to the mutable `config.ghostty`, then
+sends that single Ghostty-owned DBus action; it does not enumerate
+Ghostty windows or panes and does not emit OSC into their PTYs.
+
+Future improvement: replace full-template replacement with a
+Ghostty config codec/parser that can update only the theme keys
+while preserving unrelated mutable user settings.
 
 ## Out of scope (for the first slice)
 

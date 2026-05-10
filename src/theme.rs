@@ -76,6 +76,22 @@ pub enum ThemeConcern {
     Emacs,
 }
 
+/// Read-only complete Ghostty config templates produced by the host profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GhosttyConfigTemplates {
+    pub dark: PathBuf,
+    pub light: PathBuf,
+}
+
+impl GhosttyConfigTemplates {
+    pub fn template_for(&self, mode: ThemeMode) -> &Path {
+        match mode {
+            ThemeMode::Dark => &self.dark,
+            ThemeMode::Light => &self.light,
+        }
+    }
+}
+
 impl ThemeConcern {
     pub fn from_config_name(name: &str) -> Result<Self> {
         match name {
@@ -264,6 +280,7 @@ pub struct ThemeAxis {
     pub palettes: ThemePalettes,
     pub adapters: ThemeAdapters,
     pub font_point_size: u8,
+    pub ghostty_config_templates: Option<GhosttyConfigTemplates>,
     pub schedule: ThemeSchedule,
 }
 
@@ -294,9 +311,12 @@ impl ThemeApplier {
                     }))
                 }
                 ThemeConcern::Ghostty => {
+                    let templates = axis
+                        .ghostty_config_templates
+                        .clone()
+                        .expect("Ghostty concern requires GhosttyConfigTemplates in parsed config");
                     ThemeConcernReference::Ghostty(GhosttyThemeConcern::spawn(GhosttyThemeConcern {
-                        palettes: axis.palettes.clone(),
-                        font_point_size: axis.font_point_size,
+                        templates,
                         reloader: GhosttyReloader::application_action(),
                     }))
                 }
@@ -513,8 +533,7 @@ impl DesktopThemeConcern {
 }
 
 struct GhosttyThemeConcern {
-    palettes: ThemePalettes,
-    font_point_size: u8,
+    templates: GhosttyConfigTemplates,
     reloader: GhosttyReloader,
 }
 
@@ -531,37 +550,17 @@ impl Message<ApplyThemeConcern> for GhosttyThemeConcern {
     type Reply = ();
 
     async fn handle(&mut self, message: ApplyThemeConcern, _context: &mut Context<Self, Self::Reply>) {
-        let palette = self.palettes.for_mode(message.mode).clone();
-        if let Err(error) = self.apply(palette).await {
+        if let Err(error) = self.apply(message.mode).await {
             eprintln!("chroma-daemon ghostty theme concern error: {error}");
         }
     }
 }
 
 impl GhosttyThemeConcern {
-    async fn apply(&self, palette: ThemePalette) -> Result<()> {
+    async fn apply(&self, mode: ThemeMode) -> Result<()> {
         let directory = config_home()?.join("ghostty");
         tokio::fs::create_dir_all(&directory).await?;
-        let config = format!(
-            "font-family = IosevkaTerm Nerd Font\n\
-             font-size = {}\n\
-             window-decoration = false\n\
-             gtk-titlebar = false\n\
-             window-theme = ghostty\n\
-             background = {}\n\
-             foreground = {}\n\
-             cursor-color = {}\n\
-             selection-background = {}\n\
-             selection-foreground = {}\n\
-             {}",
-            self.font_point_size,
-            palette.base00,
-            palette.base05,
-            palette.base05,
-            palette.base02,
-            palette.base05,
-            palette.ghostty_palette_lines(),
-        );
+        let config = tokio::fs::read_to_string(self.templates.template_for(mode)).await?;
         tokio::fs::write(directory.join("config.ghostty"), config).await?;
         self.reloader.reload().await?;
         Ok(())
@@ -587,13 +586,9 @@ impl GhosttyReloader {
     async fn reload(&self) -> Result<()> {
         let reload = async {
             let connection = zbus::Connection::session().await?;
-            let proxy = zbus::Proxy::new(
-                &connection,
-                self.bus_name.as_str(),
-                self.object_path.as_str(),
-                "org.gtk.Actions",
-            )
-            .await?;
+            let proxy =
+                zbus::Proxy::new(&connection, self.bus_name.as_str(), self.object_path.as_str(), "org.gtk.Actions")
+                    .await?;
             let parameters = Vec::<Value<'static>>::new();
             let platform_data = HashMap::<&str, Value<'static>>::new();
             let _: () = proxy.call("Activate", &(self.action_name.as_str(), parameters, platform_data)).await?;

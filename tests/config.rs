@@ -34,6 +34,14 @@ fn config_file_extracts_native_theme_axis_from_nota_config() {
         Some("/bin/dconf".into())
     );
     assert_eq!(theme.font_point_size, 14);
+    assert_eq!(
+        theme.ghostty_config_templates.as_ref().map(|templates| templates.dark.to_string_lossy().to_string()),
+        Some("/tmp/chroma-test/dark.ghostty".into())
+    );
+    assert_eq!(
+        theme.ghostty_config_templates.as_ref().map(|templates| templates.light.to_string_lossy().to_string()),
+        Some("/tmp/chroma-test/light.ghostty".into())
+    );
     assert_eq!(theme.palettes.dark.base00, "#000000");
     assert_eq!(theme.palettes.light.base05, "#3d3530");
     let ThemeSchedule::Scheduled { waypoints, default } = theme.schedule else {
@@ -141,6 +149,21 @@ fn hc_chroma_004_yaml_data_inputs_are_rejected_in_favor_of_nota() {
     assert!(error.to_string().contains("YAML inputs are forbidden"));
 }
 
+#[test]
+fn ghostty_concern_requires_config_templates() {
+    let fixture = Fixture::new();
+    let config = fixture.write_config(&NATIVE_CONFIG.replace(
+        "    (GhosttyConfigTemplates
+      (Dark \"/tmp/chroma-test/dark.ghostty\")
+      (Light \"/tmp/chroma-test/light.ghostty\"))\n",
+        "",
+    ));
+
+    let error = ConfigFile::from_path(config).theme_axis().expect_err("ghostty templates must be required");
+
+    assert!(error.to_string().contains("Ghostty concern requires a GhosttyConfigTemplates record"));
+}
+
 const NATIVE_CONFIG: &str = r##"
 (Config
   (Theme
@@ -184,6 +207,9 @@ const NATIVE_CONFIG: &str = r##"
       (Dconf "/bin/dconf")
       (Emacsclient "/bin/emacsclient"))
     (FontPointSize 14)
+    (GhosttyConfigTemplates
+      (Dark "/tmp/chroma-test/dark.ghostty")
+      (Light "/tmp/chroma-test/light.ghostty"))
     (Schedule
       (Waypoint (CivilDawn (SignedMinutes 0)) Light)
       (Waypoint (CivilDusk (SignedMinutes 0)) Dark)

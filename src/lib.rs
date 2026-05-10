@@ -32,8 +32,8 @@ pub use request::Request;
 pub use response::Response;
 pub use state::{ReadStoredState, RecordBrightness, RecordTheme, RecordWarmth, StateStore, StoredVisualState};
 pub use theme::{
-    ThemeAdapters, ThemeApplier, ThemeAxis, ThemeConcern, ThemeMode, ThemePalette, ThemePalettes, ThemeSchedule,
-    ThemeWaypoint,
+    GhosttyConfigTemplates, ThemeAdapters, ThemeApplier, ThemeAxis, ThemeConcern, ThemeMode, ThemePalette,
+    ThemePalettes, ThemeSchedule, ThemeWaypoint,
 };
 pub use time::{LocalHour, LocalMinute, RampDuration, RampTrigger, SignedMinutes};
 pub use warmth::{KelvinTemperature, WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint};

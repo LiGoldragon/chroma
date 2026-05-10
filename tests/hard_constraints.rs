@@ -57,6 +57,10 @@ fn hc_chroma_010_ghostty_concern_uses_native_config_and_gtk_action_reload() {
     let theme_source = include_str!("../src/theme.rs");
 
     assert!(theme_source.contains("config.ghostty"));
+    assert!(theme_source.contains("GhosttyConfigTemplates"));
+    assert!(theme_source.contains("template_for"));
+    assert!(theme_source.contains("read_to_string"));
+    assert!(theme_source.contains("tokio::fs::write(directory.join(\"config.ghostty\")"));
     assert!(theme_source.contains("com.mitchellh.ghostty"));
     assert!(theme_source.contains("org.gtk.Actions"));
     assert!(theme_source.contains("reload-config"));

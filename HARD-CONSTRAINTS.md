@@ -56,11 +56,14 @@ Tests:
 
 ## HC-CHROMA-006 — Ghostty Native Concern, No Shell Reload Path
 
-Ghostty application writes the current Ghostty config format and
-asks the running Ghostty application to reload through Ghostty's
-`org.gtk.Actions` DBus action `reload-config`. There is no shell
-script, `systemctl` command, systemd service reload, or retained
-WezTerm reload path in Chroma.
+Ghostty application reads complete read-only Ghostty config
+templates selected by mode, copies the selected template to the
+mutable user config file `config.ghostty`, and asks the running
+Ghostty application to reload through Ghostty's `org.gtk.Actions`
+DBus action `reload-config`. The template path may be a Nix store
+path; Chroma never writes to that path. There is no shell script,
+`systemctl` command, systemd service reload, OSC palette path, or
+retained WezTerm reload path in Chroma.
 
 Test: `hc_chroma_010_ghostty_concern_uses_native_config_and_gtk_action_reload`.
 

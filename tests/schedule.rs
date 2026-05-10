@@ -32,6 +32,7 @@ fn test_theme_axis(schedule: ThemeSchedule) -> ThemeAxis {
         palettes: test_palettes(),
         adapters: ThemeAdapters::default(),
         font_point_size: 12,
+        ghostty_config_templates: None,
         schedule,
     }
 }
