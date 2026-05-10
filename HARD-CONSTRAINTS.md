@@ -74,3 +74,13 @@ filesystem notification API. Chroma must not add a config polling
 loop or a shell watcher.
 
 Test: `hc_chroma_011_config_reload_uses_push_watcher_not_polling_loop`.
+
+## HC-CHROMA-008 — GeoClue Is A System-Bus Boundary
+
+GeoClue is the platform location authority on the system bus.
+Chroma must read it through `zbus::Connection::system`; location
+permission remains platform-owned through the host GeoClue
+application configuration. Chroma must not ask the session bus for
+`org.freedesktop.GeoClue2`.
+
+Test: `hc_chroma_012_geoclue_uses_system_bus`.

@@ -925,7 +925,7 @@ struct GeoclueLocator;
 
 impl GeoclueLocator {
     async fn current_location() -> Result<Location> {
-        let connection = zbus::Connection::session().await?;
+        let connection = zbus::Connection::system().await?;
         let manager = zbus::Proxy::new(
             &connection,
             "org.freedesktop.GeoClue2",

@@ -79,3 +79,11 @@ fn hc_chroma_011_config_reload_uses_push_watcher_not_polling_loop() {
     assert!(daemon_source.contains("RecursiveMode::NonRecursive"));
     assert!(!daemon_source.contains("notify::PollWatcher"));
 }
+
+#[test]
+fn hc_chroma_012_geoclue_uses_system_bus() {
+    let daemon_source = include_str!("../src/daemon.rs");
+
+    assert!(daemon_source.contains("zbus::Connection::system().await?"));
+    assert!(!daemon_source.contains("zbus::Connection::session().await?"));
+}

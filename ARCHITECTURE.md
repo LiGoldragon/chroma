@@ -22,7 +22,8 @@ Chroma owns:
 - the typed CLI request grammar (`Request` / `Response`)
 - the IPC contract between CLI and daemon (rkyv-on-UDS)
 - the configuration and palette grammar (`Config`, NOTA on disk)
-- the bounded geoclue2 location read when twilight triggers are used
+- the bounded geoclue2 system-bus location read when twilight
+  triggers are used
 - the orchestration of ramps (start, interrupt, replace)
 - the native theme application concerns: terminal, desktop/GTK,
   Ghostty, and Emacs
@@ -36,7 +37,8 @@ Chroma does **not** own:
   chroma reads it as NOTA data and applies it, but does not
   generate, edit, or version the palette
 - the geolocation source — geoclue2 is the upstream authority;
-  chroma reads it directly but does not bypass or replicate it
+  chroma reads it directly on the system bus but does not bypass,
+  replicate, or self-grant location permission
 
 ## The three axes
 
@@ -180,7 +182,7 @@ version-skew guard at boot hard-fails on mismatch.
 | Daemon ↔ Ghostty config templates | read-only Ghostty-native text files, copied byte-for-byte |
 | Daemon ↔ mutable Ghostty config | `$XDG_CONFIG_HOME/ghostty/config.ghostty` |
 | Daemon ↔ wl-gammarelay-rs | zbus property writes (`Temperature` u16, `Brightness` f64) |
-| Daemon ↔ geoclue2 | bounded zbus location read |
+| Daemon ↔ geoclue2 | bounded zbus system-bus location read |
 | Daemon ↔ theme concerns | typed Rust values; no apply-command schema |
 | Daemon ↔ human (audit) | NOTA reply printed by the CLI |
 
