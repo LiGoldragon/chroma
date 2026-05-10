@@ -164,34 +164,6 @@ impl ThemePalette {
             self.base0d,
         )
     }
-
-    pub fn terminal_osc_sequence(&self) -> String {
-        let colors = [
-            &self.base00,
-            &self.base08,
-            &self.base0b,
-            &self.base0a,
-            &self.base0d,
-            &self.base0e,
-            &self.base0c,
-            &self.base05,
-            &self.base03,
-            &self.base08,
-            &self.base0b,
-            &self.base0a,
-            &self.base0d,
-            &self.base0e,
-            &self.base0c,
-            &self.base07,
-        ];
-        let mut sequence = String::new();
-        for (index, color) in colors.iter().enumerate() {
-            sequence.push_str(&format!("\x1b]4;{index};{color}\x07"));
-        }
-        sequence
-            .push_str(&format!("\x1b]10;{}\x07\x1b]11;{}\x07\x1b]12;{}\x07", self.base05, self.base00, self.base05));
-        sequence
-    }
 }
 
 /// Dark and light palettes read from NOTA config.

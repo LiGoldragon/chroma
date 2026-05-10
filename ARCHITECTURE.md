@@ -58,8 +58,10 @@ enqueues it to one latest-wins actor per theme concern, and
 returns `(Accepted)` immediately after those actors own the
 message. The terminal concern persists state for future shells
 only; it never scans PTYs, writes to other terminals, or forces a
-global terminal reload. A manual CLI call may write OSC only to
-its own stdout after the daemon accepts the request. Warmth and
+global terminal reload. The CLI also does not write live terminal
+palette sequences. Running terminals converge only through a
+future explicit per-window protocol, or when their own startup
+path reads the persisted state. Warmth and
 brightness support both instant (`SetWarmth`,
 `SetBrightness`) and gradual (`StartWarmthRamp`,
 `StartBrightnessRamp`) transitions.
@@ -177,12 +179,13 @@ other daemon-owned bytes are rkyv archives.
 
 Do not update running terminals by enumerating `/dev/pts`, by
 touching a reload file watched by every terminal window, or by
-any other daemon-side fanout to "all terminals". That shape
-turns one user's theme command into a global terminal event and
-can freeze unrelated agent panes. Terminal live updates are
-local to the client that initiated the request; all other
-terminals converge when they start a new shell or when their own
-terminal-local integration asks for an update.
+emitting OSC palette sequences from `SetTheme`. That shape turns
+one user's theme command into a global WezTerm event and can
+freeze unrelated agent panes. Any future live terminal update
+must be an explicit per-window protocol with a bounded
+acknowledgement before the next window is touched. Until that
+exists, terminals converge when they start a new shell or when
+their own terminal-local integration asks for an update.
 
 ## Out of scope (for the first slice)
 

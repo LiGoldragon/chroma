@@ -30,12 +30,15 @@ Test: `hc_chroma_004_yaml_data_inputs_are_rejected_in_favor_of_nota`.
 ## HC-CHROMA-004 — No Global Live-Terminal Fanout
 
 Chroma may persist terminal theme state for future shells. It
-must not scan `/dev/pts`, write OSC sequences to other terminals,
-or trigger global terminal reload files from the daemon. A live
-terminal update is caller-local only: the CLI may write OSC to
-its own stdout after a successful `SetTheme`.
+must not scan `/dev/pts`, write OSC sequences to terminals, or
+trigger global terminal reload files from the daemon or CLI.
+Running terminals are not mutated automatically by `SetTheme`.
+Any future live terminal update path must be an explicit
+per-window protocol with bounded acknowledgement before the next
+window is touched.
 
 Tests:
 
 - `hc_chroma_005_terminal_concern_does_not_broadcast_to_pty_inventory`
 - `hc_chroma_006_daemon_does_not_trigger_global_terminal_reload_files`
+- `hc_chroma_007_cli_does_not_emit_live_terminal_palette_sequences`

@@ -39,10 +39,11 @@ report, not a pull request.
    script boundary, and no retained legacy target schema.
 
 2. **No global live-terminal fanout.** The daemon never scans
-   `/dev/pts`, never writes OSC sequences to other terminals,
-   and never triggers a global terminal reload file. Running
-   terminal updates are caller-local; other terminals pick up
-   state through their own startup/integration path.
+   `/dev/pts`, never writes OSC sequences to terminals, and
+   never triggers a global terminal reload file. `SetTheme` does
+   not mutate running terminals automatically; a future live
+   terminal path must be explicit, per-window, and
+   acknowledgement-bounded.
 
 3. **rkyv on the wire, NOTA at the human boundary.** Daemon ↔
    CLI is the signal pattern (length-prefixed rkyv frames over

@@ -30,9 +30,10 @@ report is
   commands, shell script boundaries, or retained legacy target
   schemas.
 - **No global live-terminal fanout.** The daemon must not scan
-  `/dev/pts`, write OSC to other terminals, or touch reload
-  files watched by every terminal window. A live terminal update
-  is caller-local only.
+  `/dev/pts`, write OSC to terminals, or touch reload files
+  watched by every terminal window. `SetTheme` must not mutate
+  running terminals unless a future explicit per-window protocol
+  exists with bounded acknowledgement.
 - **Push-not-poll throughout.** Geoclue location pushes via
   zbus signal; deadlines push via `tokio::time::sleep_until`
   (timerfd-backed); inotify pushes config reloads; UDS frames
