@@ -42,13 +42,13 @@
             exec python ${./scripts/chroma-fake-gamma-service.py} "$@"
           '';
         };
-        fakeSystemdService = pkgs.writeShellApplication {
-          name = "chroma-fake-systemd-service";
+        fakeGhosttyService = pkgs.writeShellApplication {
+          name = "chroma-fake-ghostty-service";
           runtimeInputs = [
             pythonWithDbusNext
           ];
           text = ''
-            exec python ${./scripts/chroma-fake-systemd-service.py} "$@"
+            exec python ${./scripts/chroma-fake-ghostty-service.py} "$@"
           '';
         };
         chromaSandboxTerminal = pkgs.writeShellApplication {
@@ -56,7 +56,7 @@
           runtimeInputs = [
             chromaPackage
             fakeGammaService
-            fakeSystemdService
+            fakeGhosttyService
             pkgs.coreutils
             pkgs.dbus
             pkgs.ghostty

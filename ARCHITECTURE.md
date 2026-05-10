@@ -58,11 +58,14 @@ enqueues it to one latest-wins actor per theme concern, and
 returns `(Accepted)` immediately after those actors own the
 message. The terminal concern persists state for future shells
 only; it never scans PTYs, writes to other terminals, or forces a
-global terminal reload. The CLI also does not write live terminal
-palette sequences. Running terminals converge only through a
-future explicit per-window protocol, or when their own startup
-path reads the persisted state. Warmth and
-brightness support both instant (`SetWarmth`,
+global terminal reload. Ghostty is a native application concern:
+Chroma writes Ghostty's config file, then sends the running
+Ghostty application one bounded `org.gtk.Actions` `reload-config`
+DBus action so existing Ghostty windows reload their own config.
+The CLI does not write live terminal palette sequences. Non-Ghostty
+terminals converge only through a future explicit per-window
+protocol, or when their own startup path reads the persisted state.
+Warmth and brightness support both instant (`SetWarmth`,
 `SetBrightness`) and gradual (`StartWarmthRamp`,
 `StartBrightnessRamp`) transitions.
 
@@ -186,6 +189,12 @@ must be an explicit per-window protocol with a bounded
 acknowledgement before the next window is touched. Until that
 exists, terminals converge when they start a new shell or when
 their own terminal-local integration asks for an update.
+
+Ghostty is the named exception because it exposes a native
+application action for config reload. Chroma sends that single
+Ghostty-owned DBus action after writing `config.ghostty`; it does
+not enumerate Ghostty windows or panes and does not emit OSC into
+their PTYs.
 
 ## Out of scope (for the first slice)
 

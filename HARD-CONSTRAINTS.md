@@ -57,11 +57,12 @@ Tests:
 ## HC-CHROMA-006 — Ghostty Native Concern, No Shell Reload Path
 
 Ghostty application writes the current Ghostty config format and
-reloads the Ghostty user service through systemd's DBus API.
-There is no shell script, `systemctl` command, or retained
+asks the running Ghostty application to reload through Ghostty's
+`org.gtk.Actions` DBus action `reload-config`. There is no shell
+script, `systemctl` command, systemd service reload, or retained
 WezTerm reload path in Chroma.
 
-Test: `hc_chroma_010_ghostty_concern_uses_native_config_and_systemd_dbus_reload`.
+Test: `hc_chroma_010_ghostty_concern_uses_native_config_and_gtk_action_reload`.
 
 ## HC-CHROMA-007 — Config Reload Is Filesystem Push, Not Polling
 

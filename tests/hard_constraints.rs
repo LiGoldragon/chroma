@@ -53,13 +53,16 @@ fn hc_chroma_009_runtime_has_no_shared_mutex_between_actors() {
 }
 
 #[test]
-fn hc_chroma_010_ghostty_concern_uses_native_config_and_systemd_dbus_reload() {
+fn hc_chroma_010_ghostty_concern_uses_native_config_and_gtk_action_reload() {
     let theme_source = include_str!("../src/theme.rs");
 
     assert!(theme_source.contains("config.ghostty"));
-    assert!(theme_source.contains("ReloadUnit"));
-    assert!(theme_source.contains("app-com.mitchellh.ghostty.service"));
+    assert!(theme_source.contains("com.mitchellh.ghostty"));
+    assert!(theme_source.contains("org.gtk.Actions"));
+    assert!(theme_source.contains("reload-config"));
     assert!(!theme_source.contains("systemctl"));
+    assert!(!theme_source.contains("ReloadUnit"));
+    assert!(!theme_source.contains("app-com.mitchellh.ghostty.service"));
     assert!(!theme_source.contains("ghostty-reload"));
 }
 

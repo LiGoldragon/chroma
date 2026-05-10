@@ -205,7 +205,7 @@ fi
 
 daemon_pid=""
 gamma_pid=""
-systemd_pid=""
+ghostty_bus_pid=""
 
 cleanup() {
   if [[ -n "$daemon_pid" ]]; then
@@ -216,9 +216,9 @@ cleanup() {
     kill "$gamma_pid" 2>/dev/null || true
     wait "$gamma_pid" 2>/dev/null || true
   fi
-  if [[ -n "$systemd_pid" ]]; then
-    kill "$systemd_pid" 2>/dev/null || true
-    wait "$systemd_pid" 2>/dev/null || true
+  if [[ -n "$ghostty_bus_pid" ]]; then
+    kill "$ghostty_bus_pid" 2>/dev/null || true
+    wait "$ghostty_bus_pid" 2>/dev/null || true
   fi
   rm -f "${CHROMA_SOCKET:-}" 2>/dev/null || true
   rm -rf "${CHROMA_SANDBOX_DBUS_SOCKET_DIR:-}" 2>/dev/null || true
@@ -266,12 +266,12 @@ chroma-fake-gamma-service > "$artifact_root/fake-gamma.log" 2>&1 &
 gamma_pid="$!"
 await_ready_file "$gamma_ready"
 
-systemd_ready="$artifact_root/fake-systemd.ready"
-export CHROMA_SANDBOX_FAKE_SYSTEMD_READY="$systemd_ready"
-export CHROMA_SANDBOX_FAKE_SYSTEMD_LOG="$artifact_root/fake-systemd.calls"
-chroma-fake-systemd-service > "$artifact_root/fake-systemd.log" 2>&1 &
-systemd_pid="$!"
-await_ready_file "$systemd_ready"
+ghostty_ready="$artifact_root/fake-ghostty.ready"
+export CHROMA_SANDBOX_FAKE_GHOSTTY_READY="$ghostty_ready"
+export CHROMA_SANDBOX_FAKE_GHOSTTY_LOG="$artifact_root/fake-ghostty.calls"
+chroma-fake-ghostty-service > "$artifact_root/fake-ghostty.log" 2>&1 &
+ghostty_bus_pid="$!"
+await_ready_file "$ghostty_ready"
 
 chroma-daemon > "$artifact_root/chroma-daemon.log" 2>&1 &
 daemon_pid="$!"
@@ -303,7 +303,7 @@ esac
 
 rg -q '^\(Accepted\)$' "$artifact_root/set-theme-light.nota"
 rg -q '^\(Accepted\)$' "$artifact_root/set-theme-dark.nota"
-rg -q '^ReloadUnit app-com\.mitchellh\.ghostty\.service replace$' "$artifact_root/fake-systemd.calls"
+rg -q '^Activate reload-config$' "$artifact_root/fake-ghostty.calls"
 [[ -s "$XDG_STATE_HOME/chroma/state.redb" ]] || fail "state.redb was not written"
 
 if [[ "${CHROMA_SANDBOX_LAUNCH_TERMINAL:-false}" == true ]]; then

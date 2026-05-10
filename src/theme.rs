@@ -5,6 +5,7 @@
 //! no shell-script apply boundary and no legacy apply-command schema.
 
 use core::fmt;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -14,7 +15,7 @@ use kameo::message::{Context, Message};
 use nota_codec::NotaEnum;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tokio::time::{Duration, timeout};
-use zbus::zvariant::OwnedObjectPath;
+use zbus::zvariant::Value;
 
 use crate::error::{Error, Result};
 use crate::time::RampTrigger;
@@ -296,7 +297,7 @@ impl ThemeApplier {
                     ThemeConcernReference::Ghostty(GhosttyThemeConcern::spawn(GhosttyThemeConcern {
                         palettes: axis.palettes.clone(),
                         font_point_size: axis.font_point_size,
-                        reloader: GhosttyReloader::systemd_user_unit("app-com.mitchellh.ghostty.service"),
+                        reloader: GhosttyReloader::application_action(),
                     }))
                 }
                 ThemeConcern::Emacs => ThemeConcernReference::Emacs(EmacsThemeConcern::spawn(EmacsThemeConcern {
@@ -569,12 +570,18 @@ impl GhosttyThemeConcern {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GhosttyReloader {
-    systemd_unit: String,
+    bus_name: String,
+    object_path: String,
+    action_name: String,
 }
 
 impl GhosttyReloader {
-    fn systemd_user_unit(unit: impl Into<String>) -> Self {
-        Self { systemd_unit: unit.into() }
+    fn application_action() -> Self {
+        Self {
+            bus_name: "com.mitchellh.ghostty".into(),
+            object_path: "/com/mitchellh/ghostty".into(),
+            action_name: "reload-config".into(),
+        }
     }
 
     async fn reload(&self) -> Result<()> {
@@ -582,17 +589,19 @@ impl GhosttyReloader {
             let connection = zbus::Connection::session().await?;
             let proxy = zbus::Proxy::new(
                 &connection,
-                "org.freedesktop.systemd1",
-                "/org/freedesktop/systemd1",
-                "org.freedesktop.systemd1.Manager",
+                self.bus_name.as_str(),
+                self.object_path.as_str(),
+                "org.gtk.Actions",
             )
             .await?;
-            let _: OwnedObjectPath = proxy.call("ReloadUnit", &(self.systemd_unit.as_str(), "replace")).await?;
+            let parameters = Vec::<Value<'static>>::new();
+            let platform_data = HashMap::<&str, Value<'static>>::new();
+            let _: () = proxy.call("Activate", &(self.action_name.as_str(), parameters, platform_data)).await?;
             Ok(())
         };
         match timeout(Duration::from_secs(1), reload).await {
             Ok(result) => result,
-            Err(_) => Err(Error::Daemon { message: "ghostty systemd reload timed out".into() }),
+            Err(_) => Err(Error::Daemon { message: "ghostty reload-config action timed out".into() }),
         }
     }
 }
