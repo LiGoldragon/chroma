@@ -1,0 +1,321 @@
+original_arguments=("$@")
+use_systemd=true
+
+for argument in "$@"; do
+  if [[ "$argument" == "--no-systemd" ]]; then
+    use_systemd=false
+  fi
+done
+
+if [[ "$use_systemd" == true && -z "${CHROMA_SANDBOX_UNDER_SYSTEMD:-}" ]]; then
+  exec systemd-run \
+    --user \
+    --pipe \
+    --wait \
+    --collect \
+    --quiet \
+    --same-dir \
+    --property=Type=exec \
+    --property=RuntimeMaxSec=90s \
+    --property=PrivateTmp=yes \
+    --property=NoNewPrivileges=yes \
+    --setenv=CHROMA_SANDBOX_UNDER_SYSTEMD=1 \
+    --setenv=CHROMA_SANDBOX_PARENT_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" \
+    --setenv=CHROMA_SANDBOX_PARENT_WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" \
+    "$0" "${original_arguments[@]}"
+fi
+
+launch_terminal=true
+visible_theme="Dark"
+artifact_root="${CHROMA_SANDBOX_ARTIFACT_ROOT:-}"
+
+fail() {
+  echo "chroma sandbox failed: $*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'USAGE'
+usage: chroma-sandbox-terminal [--artifact-root PATH] [--terminal|--no-terminal] [--visible-theme Light|Dark] [--no-systemd]
+
+Runs chroma-daemon with isolated XDG config/state/cache/runtime directories,
+a private D-Bus session, and a fake wl-gammarelay service. With --terminal,
+the runner also launches one Ghostty window against the sandbox config.
+USAGE
+}
+
+while (($#)); do
+  case "$1" in
+    --artifact-root)
+      artifact_root="$2"
+      shift 2
+      ;;
+    --terminal)
+      launch_terminal=true
+      shift
+      ;;
+    --no-terminal)
+      launch_terminal=false
+      shift
+      ;;
+    --visible-theme)
+      visible_theme="$2"
+      case "$visible_theme" in
+        Light | Dark) ;;
+        *) fail "--visible-theme must be Light or Dark" ;;
+      esac
+      shift 2
+      ;;
+    --no-systemd)
+      shift
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ -z "$artifact_root" ]]; then
+  artifact_root="$(mktemp -d "${TMPDIR:-/tmp}/chroma-sandbox.XXXXXXXXXX")"
+else
+  mkdir -p "$artifact_root"
+fi
+
+export CHROMA_SANDBOX_ARTIFACT_ROOT="$artifact_root"
+
+if [[ -z "${CHROMA_SANDBOX_PREPARED:-}" ]]; then
+  parent_runtime="${CHROMA_SANDBOX_PARENT_XDG_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-}}"
+  parent_wayland="${CHROMA_SANDBOX_PARENT_WAYLAND_DISPLAY:-${WAYLAND_DISPLAY:-}}"
+  sandbox_root="$artifact_root/sandbox"
+  sandbox_home="$sandbox_root/home"
+  sandbox_runtime="$sandbox_root/run"
+
+  mkdir -p \
+    "$sandbox_home/.cache" \
+    "$sandbox_home/.config/chroma" \
+    "$sandbox_home/.config/ghostty" \
+    "$sandbox_home/.local/state" \
+    "$sandbox_runtime"
+  chmod 700 "$sandbox_runtime"
+
+  export HOME="$sandbox_home"
+  export XDG_CACHE_HOME="$sandbox_home/.cache"
+  export XDG_CONFIG_HOME="$sandbox_home/.config"
+  export XDG_STATE_HOME="$sandbox_home/.local/state"
+  export XDG_RUNTIME_DIR="$sandbox_runtime"
+  export CHROMA_CONFIG="$XDG_CONFIG_HOME/chroma/config.nota"
+  export CHROMA_SOCKET="$XDG_RUNTIME_DIR/chroma.sock"
+  export CHROMA_SANDBOX_PREPARED=1
+  export CHROMA_SANDBOX_LAUNCH_TERMINAL="$launch_terminal"
+  export CHROMA_SANDBOX_VISIBLE_THEME="$visible_theme"
+  export CHROMA_SANDBOX_PARENT_XDG_RUNTIME_DIR="$parent_runtime"
+  export CHROMA_SANDBOX_PARENT_WAYLAND_DISPLAY="$parent_wayland"
+
+  cat > "$CHROMA_CONFIG" <<'NOTA'
+(Config
+  (Theme
+    (Concerns Terminal Ghostty)
+    (Palettes
+      (Dark
+        (Base00 "#000000")
+        (Base01 "#1a1a1a")
+        (Base02 "#2d2d2d")
+        (Base03 "#505050")
+        (Base04 "#b0b0b0")
+        (Base05 "#d0d0d0")
+        (Base06 "#e0e0e0")
+        (Base07 "#ffffff")
+        (Base08 "#ff0066")
+        (Base09 "#ff8800")
+        (Base0A "#f5c000")
+        (Base0B "#00cc44")
+        (Base0C "#cc44ff")
+        (Base0D "#e040a0")
+        (Base0E "#bb44ee")
+        (Base0F "#ff5577"))
+      (Light
+        (Base00 "#faf5f0")
+        (Base01 "#efe8e2")
+        (Base02 "#ddd5ce")
+        (Base03 "#887a70")
+        (Base04 "#6a5e55")
+        (Base05 "#3d3530")
+        (Base06 "#2a2420")
+        (Base07 "#1a1510")
+        (Base08 "#cc0044")
+        (Base09 "#d06600")
+        (Base0A "#b89000")
+        (Base0B "#1a8a30")
+        (Base0C "#9930cc")
+        (Base0D "#b03080")
+        (Base0E "#8822bb")
+        (Base0F "#cc3355")))
+    (Adapters)
+    (FontPointSize 14)
+    (Schedule (Manual Light)))
+  (Warmth (Schedule (Manual Neutral)))
+  (Brightness (Schedule (Manual Bright))))
+NOTA
+
+  dbus_socket_dir="$(mktemp -d "${TMPDIR:-/tmp}/chroma-dbus.XXXXXXXXXX")"
+  export CHROMA_SANDBOX_DBUS_SOCKET_DIR="$dbus_socket_dir"
+  cat > "$artifact_root/dbus-session.conf" <<DBUS
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>session</type>
+  <listen>unix:tmpdir=$dbus_socket_dir</listen>
+  <auth>EXTERNAL</auth>
+  <policy context="default">
+    <allow own="*"/>
+    <allow send_destination="*"/>
+    <allow receive_sender="*"/>
+  </policy>
+</busconfig>
+DBUS
+
+  echo "artifact-root $artifact_root"
+  dbus_run_session_arguments=(--config-file "$artifact_root/dbus-session.conf")
+  exec dbus-run-session "${dbus_run_session_arguments[@]}" -- "$0" --no-systemd "${original_arguments[@]}"
+fi
+
+if [[ "${CHROMA_SANDBOX_LAUNCH_TERMINAL:-false}" == true ]]; then
+  parent_runtime="${CHROMA_SANDBOX_PARENT_XDG_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-}}"
+  parent_wayland="${CHROMA_SANDBOX_PARENT_WAYLAND_DISPLAY:-${WAYLAND_DISPLAY:-}}"
+  [[ -n "$parent_runtime" ]] || fail "WAYLAND_DISPLAY is requested but the parent XDG_RUNTIME_DIR is empty"
+  [[ -n "$parent_wayland" ]] || fail "WAYLAND_DISPLAY is requested but empty"
+
+  if [[ "$parent_wayland" == /* ]]; then
+    [[ -S "$parent_wayland" ]] || fail "Wayland socket is not present: $parent_wayland"
+    export WAYLAND_DISPLAY="$parent_wayland"
+  else
+    host_wayland="$parent_runtime/$parent_wayland"
+    sandbox_wayland="$XDG_RUNTIME_DIR/$parent_wayland"
+    [[ -S "$host_wayland" ]] || fail "Wayland socket is not present: $host_wayland"
+    mkdir -p "$(dirname "$sandbox_wayland")"
+    ln -sf "$host_wayland" "$sandbox_wayland"
+    export WAYLAND_DISPLAY="$parent_wayland"
+  fi
+fi
+
+daemon_pid=""
+gamma_pid=""
+systemd_pid=""
+
+cleanup() {
+  if [[ -n "$daemon_pid" ]]; then
+    kill "$daemon_pid" 2>/dev/null || true
+    wait "$daemon_pid" 2>/dev/null || true
+  fi
+  if [[ -n "$gamma_pid" ]]; then
+    kill "$gamma_pid" 2>/dev/null || true
+    wait "$gamma_pid" 2>/dev/null || true
+  fi
+  if [[ -n "$systemd_pid" ]]; then
+    kill "$systemd_pid" 2>/dev/null || true
+    wait "$systemd_pid" 2>/dev/null || true
+  fi
+  rm -f "${CHROMA_SOCKET:-}" 2>/dev/null || true
+  rm -rf "${CHROMA_SANDBOX_DBUS_SOCKET_DIR:-}" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+await_socket() {
+  local socket_path="$1"
+  if [[ -S "$socket_path" ]]; then
+    return 0
+  fi
+  inotifywait -q -t 5 -e create -e moved_to "$(dirname "$socket_path")" >/dev/null || true
+  [[ -S "$socket_path" ]] || fail "daemon socket did not appear: $socket_path"
+}
+
+await_ready_file() {
+  local ready_file="$1"
+  if [[ -f "$ready_file" ]]; then
+    return 0
+  fi
+  inotifywait -q -t 5 -e create -e moved_to "$(dirname "$ready_file")" >/dev/null || true
+  [[ -f "$ready_file" ]] || fail "ready file did not appear: $ready_file"
+}
+
+await_ghostty_background() {
+  local expected_background="$1"
+  local config_file="$XDG_CONFIG_HOME/ghostty/config.ghostty"
+  local deadline=$((SECONDS + 5))
+  local remaining
+
+  while ((SECONDS < deadline)); do
+    if [[ -f "$config_file" ]] && rg -q "^background = $expected_background$" "$config_file"; then
+      return 0
+    fi
+    remaining=$((deadline - SECONDS))
+    inotifywait -q -t "$remaining" -e create -e modify -e close_write "$XDG_CONFIG_HOME/ghostty" >/dev/null || true
+  done
+
+  fail "ghostty config did not reach background $expected_background"
+}
+
+gamma_ready="$artifact_root/fake-gamma.ready"
+export CHROMA_SANDBOX_FAKE_GAMMA_READY="$gamma_ready"
+chroma-fake-gamma-service > "$artifact_root/fake-gamma.log" 2>&1 &
+gamma_pid="$!"
+await_ready_file "$gamma_ready"
+
+systemd_ready="$artifact_root/fake-systemd.ready"
+export CHROMA_SANDBOX_FAKE_SYSTEMD_READY="$systemd_ready"
+export CHROMA_SANDBOX_FAKE_SYSTEMD_LOG="$artifact_root/fake-systemd.calls"
+chroma-fake-systemd-service > "$artifact_root/fake-systemd.log" 2>&1 &
+systemd_pid="$!"
+await_ready_file "$systemd_ready"
+
+chroma-daemon > "$artifact_root/chroma-daemon.log" 2>&1 &
+daemon_pid="$!"
+await_socket "$CHROMA_SOCKET"
+
+chroma '(GetState)' > "$artifact_root/get-state-before.nota"
+
+chroma '(SetTheme Light)' > "$artifact_root/set-theme-light.nota"
+await_ghostty_background "#faf5f0"
+cp "$XDG_CONFIG_HOME/ghostty/config.ghostty" "$artifact_root/ghostty-light.config"
+
+chroma '(SetTheme Dark)' > "$artifact_root/set-theme-dark.nota"
+await_ghostty_background "#000000"
+cp "$XDG_CONFIG_HOME/ghostty/config.ghostty" "$artifact_root/ghostty-dark.config"
+
+case "${CHROMA_SANDBOX_VISIBLE_THEME:-Dark}" in
+  Light)
+    chroma '(SetTheme Light)' > "$artifact_root/set-visible-theme.nota"
+    await_ghostty_background "#faf5f0"
+    ;;
+  Dark)
+    chroma '(SetTheme Dark)' > "$artifact_root/set-visible-theme.nota"
+    await_ghostty_background "#000000"
+    ;;
+  *)
+    fail "unsupported visible theme ${CHROMA_SANDBOX_VISIBLE_THEME:-}"
+    ;;
+esac
+
+rg -q '^\(Accepted\)$' "$artifact_root/set-theme-light.nota"
+rg -q '^\(Accepted\)$' "$artifact_root/set-theme-dark.nota"
+rg -q '^ReloadUnit app-com\.mitchellh\.ghostty\.service replace$' "$artifact_root/fake-systemd.calls"
+[[ -s "$XDG_STATE_HOME/chroma/state.redb" ]] || fail "state.redb was not written"
+
+if [[ "${CHROMA_SANDBOX_LAUNCH_TERMINAL:-false}" == true ]]; then
+  terminal_script="printf \"Chroma sandbox: isolated Ghostty config loaded.\\nArtifacts: %s\\n\" \"\$CHROMA_SANDBOX_ARTIFACT_ROOT\"; sleep 20"
+  ghostty \
+    --gtk-single-instance=false \
+    --class=org.criome.ChromaSandbox \
+    --title="Chroma Sandbox" \
+    -e bash -lc "$terminal_script" &
+  terminal_pid="$!"
+  echo "$terminal_pid" > "$artifact_root/ghostty.pid"
+  wait "$terminal_pid" || true
+fi
+
+echo "sandbox-ok $artifact_root"

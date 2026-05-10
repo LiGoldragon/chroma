@@ -27,15 +27,81 @@
           CHROMA_TEST_SHELL = "${pkgs.bash}/bin/bash";
         };
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-      in
-      {
-        packages.default = craneLib.buildPackage (commonArgs // {
+        chromaPackage = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
         });
+        pythonWithDbusNext = pkgs.python3.withPackages (pythonPackages: [
+          pythonPackages.dbus-next
+        ]);
+        fakeGammaService = pkgs.writeShellApplication {
+          name = "chroma-fake-gamma-service";
+          runtimeInputs = [
+            pythonWithDbusNext
+          ];
+          text = ''
+            exec python ${./scripts/chroma-fake-gamma-service.py} "$@"
+          '';
+        };
+        fakeSystemdService = pkgs.writeShellApplication {
+          name = "chroma-fake-systemd-service";
+          runtimeInputs = [
+            pythonWithDbusNext
+          ];
+          text = ''
+            exec python ${./scripts/chroma-fake-systemd-service.py} "$@"
+          '';
+        };
+        chromaSandboxTerminal = pkgs.writeShellApplication {
+          name = "chroma-sandbox-terminal";
+          runtimeInputs = [
+            chromaPackage
+            fakeGammaService
+            fakeSystemdService
+            pkgs.coreutils
+            pkgs.dbus
+            pkgs.ghostty
+            pkgs.gnugrep
+            pkgs.inotify-tools
+            pkgs.ripgrep
+            pkgs.systemd
+          ];
+          text = builtins.readFile ./scripts/chroma-sandbox-terminal;
+        };
+      in
+      {
+        packages.default = chromaPackage;
+        packages.chroma-sandbox-terminal = chromaSandboxTerminal;
 
         checks.default = craneLib.cargoTest (commonArgs // {
           inherit cargoArtifacts;
         });
+        checks.sandbox-terminal = pkgs.runCommand "chroma-sandbox-terminal-check"
+          {
+            nativeBuildInputs = [
+              chromaSandboxTerminal
+            ];
+          }
+          ''
+            chroma-sandbox-terminal \
+              --no-systemd \
+              --no-terminal \
+              --artifact-root "$out"
+          '';
+
+        apps.sandbox-terminal = flake-utils.lib.mkApp {
+          drv = chromaSandboxTerminal;
+        };
+        apps.sandbox-check = flake-utils.lib.mkApp {
+          drv = pkgs.writeShellApplication {
+            name = "chroma-sandbox-check";
+            runtimeInputs = [
+              chromaSandboxTerminal
+            ];
+            text = ''
+              exec chroma-sandbox-terminal --no-systemd --no-terminal "$@"
+            '';
+          };
+        };
 
         devShells.default = pkgs.mkShell {
           name = "chroma";
