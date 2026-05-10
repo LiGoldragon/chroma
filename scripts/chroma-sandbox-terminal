@@ -310,7 +310,7 @@ if [[ "${CHROMA_SANDBOX_LAUNCH_TERMINAL:-false}" == true ]]; then
   terminal_script="printf \"Chroma sandbox: isolated Ghostty config loaded.\\nArtifacts: %s\\n\" \"\$CHROMA_SANDBOX_ARTIFACT_ROOT\"; sleep 20"
   ghostty \
     --gtk-single-instance=false \
-    --class=org.criome.ChromaSandbox \
+    --class=org.criome.AgentTestWindow \
     --title="Chroma Sandbox" \
     -e bash -lc "$terminal_script" &
   terminal_pid="$!"
