@@ -20,7 +20,8 @@ report is
 - **Three independent axes.** Theme, warmth, and brightness are
   coordinated by **proximity in one daemon**, not by **coupling
   of decisions**. The axes share infrastructure (one config, one
-  redb, one geoclue subscription, one CLI, one socket); their
+  redb, one bounded geoclue location read path, one CLI, one
+  socket); their
   scheduled events do not share fires.
 - **Native theme concerns.** `chroma` owns terminal,
   desktop/GTK, Ghostty, and Emacs theme application as
@@ -34,12 +35,13 @@ report is
   watched by every terminal window. `SetTheme` must not mutate
   running terminals unless a future explicit per-window protocol
   exists with bounded acknowledgement.
-- **Push-not-poll throughout.** Geoclue location pushes via
-  zbus signal; deadlines push via `tokio::time::sleep_until`
-  (timerfd-backed); inotify pushes config reloads; UDS frames
-  push CLI commands; zbus pushes property writes to
-  wl-gammarelay-rs. There is no `loop { check_time(); sleep(N);
-  }` anywhere. See `~/primary/skills/push-not-pull.md`.
+- **Push-not-poll throughout.** Deadlines push via Kameo delayed
+  messages (timerfd-backed); inotify pushes config reloads; UDS
+  frames push CLI commands; zbus pushes property writes to
+  wl-gammarelay-rs. Geoclue is read only when civil triggers need
+  a location and retried by bounded delayed actor message if it
+  is unavailable. There is no `loop { check_time(); sleep(N); }`
+  anywhere. See `~/primary/skills/push-not-pull.md`.
 - **rkyv on the wire, NOTA at the human boundary.** Daemon ↔
   CLI is rkyv-archived `Request` / `Response` frames
   on a Unix socket (the canonical signal pattern from

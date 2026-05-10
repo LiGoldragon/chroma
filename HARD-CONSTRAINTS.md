@@ -62,3 +62,11 @@ There is no shell script, `systemctl` command, or retained
 WezTerm reload path in Chroma.
 
 Test: `hc_chroma_010_ghostty_concern_uses_native_config_and_systemd_dbus_reload`.
+
+## HC-CHROMA-007 — Config Reload Is Filesystem Push, Not Polling
+
+Config reload is owned by a Kameo actor backed by the platform
+filesystem notification API. Chroma must not add a config polling
+loop or a shell watcher.
+
+Test: `hc_chroma_011_config_reload_uses_push_watcher_not_polling_loop`.

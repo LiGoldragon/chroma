@@ -7,6 +7,7 @@
 //! return `(Accepted)` without waiting for desktop, Ghostty,
 //! Emacs, or gamma side effects to finish.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -15,6 +16,7 @@ use kameo::actor::{Actor, ActorRef, Spawn};
 use kameo::error::Infallible;
 use kameo::message::{Context, Message};
 use kameo::reply::DelegatedReply;
+use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher, recommended_watcher};
 use sunrise::{Coordinates, DawnType, SolarDay, SolarEvent};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::time::{Duration, Instant, MissedTickBehavior, interval, timeout};
@@ -34,8 +36,10 @@ use crate::wire::{read_frame, socket_path, write_frame};
 
 /// Run the daemon until SIGTERM / Ctrl-C.
 pub async fn run() -> Result<()> {
-    let config = ConfigFile::from_default_locations()?.config()?;
+    let config_file = ConfigFile::from_default_locations()?;
+    let config = config_file.config()?;
     let root = ChromaRoot::start(config).await?;
+    let config_watcher = ConfigWatcher::start(config_file, root.clone()).await?;
     root.ask(BeginSchedule).await.map_err(|error| Error::ActorCall { message: error.to_string() })?;
 
     let path = socket_path();
@@ -64,6 +68,8 @@ pub async fn run() -> Result<()> {
         }
     }
 
+    let _ = config_watcher.stop_gracefully().await;
+    config_watcher.wait_for_shutdown().await;
     let _ = root.stop_gracefully().await;
     root.wait_for_shutdown().await;
     let _ = std::fs::remove_file(&path);
@@ -256,6 +262,25 @@ impl ChromaRoot {
         }
         Ok(())
     }
+
+    async fn install_config(&mut self, config: Config, root: ActorRef<ChromaRoot>) -> Result<()> {
+        let next_theme_applier = ThemeApplier::start(config.theme.clone()).await;
+        let next_schedule_engine = ScheduleEngine::start(config, root).await;
+        let previous_theme_applier = std::mem::replace(&mut self.theme_applier, next_theme_applier);
+        let previous_schedule_engine = self.schedule_engine.replace(next_schedule_engine.clone());
+
+        self.enqueue_theme(self.theme).await?;
+        next_schedule_engine
+            .tell(EvaluateSchedule)
+            .await
+            .map_err(|error| Error::ActorCall { message: error.to_string() })?;
+
+        let _ = previous_theme_applier.stop_gracefully().await;
+        if let Some(previous_schedule_engine) = previous_schedule_engine {
+            let _ = previous_schedule_engine.stop_gracefully().await;
+        }
+        Ok(())
+    }
 }
 
 impl Actor for ChromaRoot {
@@ -327,6 +352,121 @@ impl Message<ApplyScheduledState> for ChromaRoot {
             eprintln!("chroma-daemon schedule apply error: {error}");
         }
     }
+}
+
+struct InstallConfig {
+    config: Config,
+}
+
+impl Message<InstallConfig> for ChromaRoot {
+    type Reply = Result<()>;
+
+    async fn handle(&mut self, message: InstallConfig, context: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.install_config(message.config, context.actor_ref().clone()).await
+    }
+}
+
+struct ConfigWatcher {
+    config_file: ConfigFile,
+    root: ActorRef<ChromaRoot>,
+    watcher: Option<RecommendedWatcher>,
+    generation: u64,
+}
+
+impl ConfigWatcher {
+    async fn start(config_file: ConfigFile, root: ActorRef<ChromaRoot>) -> Result<ActorRef<Self>> {
+        let reference = Self::spawn(Self { config_file, root, watcher: None, generation: 0 });
+        reference.wait_for_startup().await;
+        reference.ask(StartWatchingConfig).await.map_err(|error| Error::ActorCall { message: error.to_string() })?;
+        Ok(reference)
+    }
+
+    fn watched_directory(&self) -> Result<PathBuf> {
+        self.config_file
+            .path()
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| Error::Config { message: format!("{} has no parent directory", self.config_file) })
+    }
+
+    fn target_path(&self) -> PathBuf {
+        self.config_file.path().to_path_buf()
+    }
+}
+
+impl Actor for ConfigWatcher {
+    type Args = Self;
+    type Error = Infallible;
+
+    async fn on_start(watcher: Self::Args, _reference: ActorRef<Self>) -> std::result::Result<Self, Self::Error> {
+        Ok(watcher)
+    }
+}
+
+struct StartWatchingConfig;
+
+impl Message<StartWatchingConfig> for ConfigWatcher {
+    type Reply = Result<()>;
+
+    async fn handle(&mut self, _message: StartWatchingConfig, context: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let watched_directory = self.watched_directory()?;
+        let target_path = self.target_path();
+        let actor = context.actor_ref().clone();
+        let mut watcher = recommended_watcher(move |event: notify::Result<Event>| match event {
+            Ok(event) if config_event_touches(&event, &target_path) => {
+                let _ = actor.tell(ConfigFileChanged).try_send();
+            }
+            Ok(_) => {}
+            Err(error) => eprintln!("chroma-daemon config watcher error: {error}"),
+        })?;
+        watcher.watch(&watched_directory, RecursiveMode::NonRecursive)?;
+        self.watcher = Some(watcher);
+        Ok(())
+    }
+}
+
+struct ConfigFileChanged;
+
+impl Message<ConfigFileChanged> for ConfigWatcher {
+    type Reply = ();
+
+    async fn handle(&mut self, _message: ConfigFileChanged, context: &mut Context<Self, Self::Reply>) {
+        self.generation = self.generation.saturating_add(1);
+        let _scheduled = context
+            .actor_ref()
+            .tell(ReloadChangedConfig { generation: self.generation })
+            .send_after(Duration::from_millis(100));
+    }
+}
+
+struct ReloadChangedConfig {
+    generation: u64,
+}
+
+impl Message<ReloadChangedConfig> for ConfigWatcher {
+    type Reply = ();
+
+    async fn handle(&mut self, message: ReloadChangedConfig, _context: &mut Context<Self, Self::Reply>) {
+        if message.generation != self.generation {
+            return;
+        }
+        match self.config_file.config_async().await {
+            Ok(config) => {
+                if let Err(error) = self.root.tell(InstallConfig { config }).await {
+                    eprintln!("chroma-daemon config reload enqueue error: {error}");
+                }
+            }
+            Err(error) => eprintln!("chroma-daemon config reload error: {error}"),
+        }
+    }
+}
+
+fn config_event_touches(event: &Event, target_path: &Path) -> bool {
+    if matches!(event.kind, EventKind::Access(_)) {
+        return false;
+    }
+    let target_file_name = target_path.file_name();
+    event.paths.iter().any(|path| path == target_path || path.file_name() == target_file_name)
 }
 
 struct WarmthApplier {

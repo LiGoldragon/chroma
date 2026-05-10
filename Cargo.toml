@@ -22,11 +22,12 @@ path = "src/bin/chroma_daemon.rs"
 chrono     = { version = "0.4", default-features = false, features = ["clock"] }
 kameo      = { version = "0.20", default-features = false, features = ["macros", "tracing"] }
 nota-codec = { git = "https://github.com/LiGoldragon/nota-codec.git", branch = "main" }
+notify     = "5.2"
 redb       = "2.6.3"
 rkyv       = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
 sunrise    = "3"
 thiserror  = "2"
-tokio      = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "signal", "sync", "time", "process"] }
+tokio      = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "signal", "sync", "time", "process", "fs"] }
 zbus       = { version = "5", default-features = false, features = ["tokio"] }
 
 [dev-dependencies]

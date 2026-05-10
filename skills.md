@@ -17,8 +17,8 @@ applies these axes belongs in this repo; anything that only
 The capability is *animating the visual state of the desktop*.
 The three axes are coordinated by proximity in one daemon, not
 by coupling of decisions. They share infrastructure (one config,
-one redb, one geoclue subscription, one CLI, one socket); their
-scheduled events do not share fires.
+one redb, one bounded geoclue location read path, one CLI, one
+socket); their scheduled events do not share fires.
 
 The design context lives in
 `~/primary/reports/system-specialist/28-chroma-unified-visual-daemon.md`.
@@ -57,11 +57,12 @@ report, not a pull request.
    cannot read the daemon state directly; they are not Chroma's
    source of truth.
 
-5. **Push, not poll.** Schedule fires are `tokio::time::sleep_until`
-   deadlines (timerfd-backed). Geoclue is a zbus signal
-   subscription. Config reload is inotify. CLI commands are UDS
-   frames. Property writes are zbus method calls. There is no
-   loop-and-check anywhere. The carve-outs in
+5. **Push, not poll.** Schedule fires are Kameo delayed
+   messages (timerfd-backed). Geoclue is read only when civil
+   triggers need a location and retried by bounded delayed actor
+   message if unavailable. Config reload is inotify. CLI
+   commands are UDS frames. Property writes are zbus method
+   calls. There is no loop-and-check anywhere. The carve-outs in
    `~/primary/skills/push-not-pull.md` (reachability probes,
    backpressure-aware pacing, deadline timers) are the only
    exceptions.
@@ -89,7 +90,8 @@ report, not a pull request.
   generate, or version it.
 - The wl-gammarelay-rs daemon. Chroma is its sole consumer; the
   daemon's lifecycle is owned by the home-manager systemd unit.
-- The geoclue2 service. Subscribed, not embedded.
+- The geoclue2 service. Read as the upstream authority, not
+  embedded or replicated.
 - The systemd graphical-session target. Chroma's user service
   declares `After=wl-gammarelay-rs.service` and
   `WantedBy=graphical-session.target`; the rest of the boot

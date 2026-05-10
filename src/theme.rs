@@ -8,8 +8,8 @@ use core::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use kameo::actor::{Actor, ActorRef, Spawn};
-use kameo::error::Infallible;
+use kameo::actor::{Actor, ActorRef, Spawn, WeakActorRef};
+use kameo::error::{ActorStopReason, Infallible};
 use kameo::message::{Context, Message};
 use nota_codec::NotaEnum;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
@@ -327,6 +327,27 @@ impl ThemeConcernReference {
         }
         .map_err(|error| Error::ActorCall { message: error.to_string() })
     }
+
+    async fn stop(&self) {
+        match self {
+            Self::Terminal(reference) => {
+                let _ = reference.stop_gracefully().await;
+                reference.wait_for_shutdown().await;
+            }
+            Self::Desktop(reference) => {
+                let _ = reference.stop_gracefully().await;
+                reference.wait_for_shutdown().await;
+            }
+            Self::Ghostty(reference) => {
+                let _ = reference.stop_gracefully().await;
+                reference.wait_for_shutdown().await;
+            }
+            Self::Emacs(reference) => {
+                let _ = reference.stop_gracefully().await;
+                reference.wait_for_shutdown().await;
+            }
+        }
+    }
 }
 
 impl Actor for ThemeApplier {
@@ -335,6 +356,17 @@ impl Actor for ThemeApplier {
 
     async fn on_start(axis: Self::Args, _reference: ActorRef<Self>) -> std::result::Result<Self, Self::Error> {
         Ok(Self::from_axis(axis))
+    }
+
+    async fn on_stop(
+        &mut self,
+        _actor_ref: WeakActorRef<Self>,
+        _reason: ActorStopReason,
+    ) -> std::result::Result<(), Self::Error> {
+        for concern in &self.concerns {
+            concern.stop().await;
+        }
+        Ok(())
     }
 }
 

@@ -22,7 +22,7 @@ Chroma owns:
 - the typed CLI request grammar (`Request` / `Response`)
 - the IPC contract between CLI and daemon (rkyv-on-UDS)
 - the configuration and palette grammar (`Config`, NOTA on disk)
-- the geoclue2 subscription (when twilight triggers are used)
+- the bounded geoclue2 location read when twilight triggers are used
 - the orchestration of ramps (start, interrupt, replace)
 - the native theme application concerns: terminal, desktop/GTK,
   Ghostty, and Emacs
@@ -35,8 +35,8 @@ Chroma does **not** own:
 - the colour palette's authorship — Ignis is the palette;
   chroma reads it as NOTA data and applies it, but does not
   generate, edit, or version the palette
-- the geolocation source — geoclue2 is the upstream signal;
-  chroma subscribes but does not bypass or replicate
+- the geolocation source — geoclue2 is the upstream authority;
+  chroma reads it directly but does not bypass or replicate it
 
 ## The three axes
 
@@ -135,9 +135,11 @@ on inotify push. Parses into a typed `Config`:
 Each axis schedule is a list of `Waypoint` records + a `Default`.
 Triggers: `(CivilDawn (SignedMinutes <n>))`,
 `(CivilDusk (SignedMinutes <n>))`, `(TimeOfDay <h> <m>)`.
-The geoclue subscription opens iff any axis uses a twilight
-trigger. Data-format inputs at the Chroma boundary are NOTA; YAML
-and YML inputs are rejected.
+The geoclue read runs iff any axis uses a twilight trigger; if
+geolocation is unavailable, the schedule actor retries on a
+bounded delayed message instead of running a polling loop.
+Data-format inputs at the Chroma boundary are NOTA; YAML and YML
+inputs are rejected.
 
 ## Persistence
 
@@ -165,7 +167,7 @@ version-skew guard at boot hard-fails on mismatch.
 | Daemon ↔ disk (state) | rkyv values inside redb tables |
 | Daemon ↔ disk (config + palettes) | NOTA text record (`Config`) |
 | Daemon ↔ wl-gammarelay-rs | zbus property writes (`Temperature` u16, `Brightness` f64) |
-| Daemon ↔ geoclue2 | zbus signal subscription |
+| Daemon ↔ geoclue2 | bounded zbus location read |
 | Daemon ↔ theme concerns | typed Rust values; no apply-command schema |
 | Daemon ↔ human (audit) | NOTA reply printed by the CLI |
 

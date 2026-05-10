@@ -23,6 +23,10 @@ pub enum Error {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 
+    /// Native filesystem notification setup failed.
+    #[error("notify: {0}")]
+    Notify(#[source] Box<notify::Error>),
+
     /// Configuration is missing or malformed.
     #[error("config: {message}")]
     Config { message: String },
@@ -98,5 +102,11 @@ impl From<redb::CommitError> for Error {
 impl From<redb::StorageError> for Error {
     fn from(error: redb::StorageError) -> Self {
         Self::RedbStorage(Box::new(error))
+    }
+}
+
+impl From<notify::Error> for Error {
+    fn from(error: notify::Error) -> Self {
+        Self::Notify(Box::new(error))
     }
 }

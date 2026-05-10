@@ -46,14 +46,30 @@ impl ConfigFile {
 
     /// Extract the theme axis from the NOTA config.
     pub fn theme_axis(&self) -> Result<ThemeAxis> {
-        let text = std::fs::read_to_string(&self.path)?;
-        ConfigText::new(&text).theme_axis()
+        Self::decode_theme_axis(&std::fs::read_to_string(&self.path)?)
     }
 
     /// Decode the full Chroma config.
     pub fn config(&self) -> Result<Config> {
-        let text = std::fs::read_to_string(&self.path)?;
-        ConfigText::new(&text).config()
+        Self::decode_config(&std::fs::read_to_string(&self.path)?)
+    }
+
+    /// Decode the full Chroma config without blocking the async runtime on file I/O.
+    pub async fn config_async(&self) -> Result<Config> {
+        Self::decode_config(&tokio::fs::read_to_string(&self.path).await?)
+    }
+
+    /// The concrete path watched by the daemon.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn decode_theme_axis(text: &str) -> Result<ThemeAxis> {
+        ConfigText::new(text).theme_axis()
+    }
+
+    fn decode_config(text: &str) -> Result<Config> {
+        ConfigText::new(text).config()
     }
 }
 

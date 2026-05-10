@@ -62,3 +62,13 @@ fn hc_chroma_010_ghostty_concern_uses_native_config_and_systemd_dbus_reload() {
     assert!(!theme_source.contains("systemctl"));
     assert!(!theme_source.contains("ghostty-reload"));
 }
+
+#[test]
+fn hc_chroma_011_config_reload_uses_push_watcher_not_polling_loop() {
+    let daemon_source = include_str!("../src/daemon.rs");
+
+    assert!(daemon_source.contains("struct ConfigWatcher"));
+    assert!(daemon_source.contains("recommended_watcher"));
+    assert!(daemon_source.contains("RecursiveMode::NonRecursive"));
+    assert!(!daemon_source.contains("notify::PollWatcher"));
+}
