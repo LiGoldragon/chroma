@@ -1,22 +1,22 @@
 //! `ThemeMode` — the desktop's colour-scheme axis.
 //!
-//! Two values: [`ThemeMode::Dark`] and [`ThemeMode::Light`].
-//! Theme switches are accepted instantly; the daemon spawns the
-//! configured shell script with the lowercase variant name as a
-//! single positional argument and waits for completion outside
-//! the request path.
-//!
-//! This module also names the axis's scheduling shape:
-//! [`ThemeWaypoint`], [`ThemeSchedule`], [`ThemeAxis`].
+//! Theme switches are accepted instantly. The daemon fans the
+//! requested mode out to independent native concern actors. There is
+//! no shell-script apply boundary and no legacy apply-command schema.
 
 use core::fmt;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use nota_codec::NotaEnum;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use tokio::process::Child;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::task::AbortHandle;
+use tokio::time::{Duration, timeout};
 
-use crate::config::ApplyCommand;
 use crate::error::{Error, Result};
 use crate::time::RampTrigger;
 
@@ -28,7 +28,7 @@ pub enum ThemeMode {
 }
 
 impl ThemeMode {
-    /// The lowercase name passed as the apply-command argument.
+    /// The lowercase name used in human-facing files and diagnostics.
     pub const fn as_str(self) -> &'static str {
         match self {
             ThemeMode::Dark => "dark",
@@ -51,6 +51,176 @@ impl fmt::Display for ThemeMode {
     }
 }
 
+/// A separately-owned native theme application concern.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ThemeConcern {
+    /// Terminal palettes and terminal-local state.
+    Terminal,
+    /// Desktop/GTK color-scheme state consumed by apps.
+    Desktop,
+    /// Ghostty configuration.
+    Ghostty,
+    /// Running Emacs daemons.
+    Emacs,
+}
+
+impl ThemeConcern {
+    pub fn from_config_name(name: &str) -> Result<Self> {
+        match name {
+            "Terminal" => Ok(Self::Terminal),
+            "Desktop" | "Gtk" | "GTK" => Ok(Self::Desktop),
+            "Ghostty" => Ok(Self::Ghostty),
+            "Emacs" => Ok(Self::Emacs),
+            "Legacy" | "ApplyCommand" | "ApplyTargets" => {
+                Err(Error::Config { message: format!("{name} belongs to the removed apply-command architecture") })
+            }
+            _ => Err(Error::Config { message: format!("unknown theme concern {name:?}") }),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Terminal => "terminal",
+            Self::Desktop => "desktop",
+            Self::Ghostty => "ghostty",
+            Self::Emacs => "emacs",
+        }
+    }
+
+    async fn apply(self, mode: ThemeMode, context: Arc<ThemeApplyContext>) -> Result<()> {
+        let palette = context.palettes.for_mode(mode);
+        match self {
+            Self::Terminal => TerminalThemeConcern::new(mode, palette.clone()).apply().await,
+            Self::Desktop => DesktopThemeConcern::new(mode, &context.adapters).apply().await,
+            Self::Ghostty => GhosttyThemeConcern::new(palette.clone(), context.font_point_size).apply().await,
+            Self::Emacs => EmacsThemeConcern::new(mode, &context.adapters).apply().await,
+        }
+    }
+}
+
+impl fmt::Display for ThemeConcern {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// A base16 palette consumed by native theme concerns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThemePalette {
+    pub base00: String,
+    pub base01: String,
+    pub base02: String,
+    pub base03: String,
+    pub base04: String,
+    pub base05: String,
+    pub base06: String,
+    pub base07: String,
+    pub base08: String,
+    pub base09: String,
+    pub base0a: String,
+    pub base0b: String,
+    pub base0c: String,
+    pub base0d: String,
+    pub base0e: String,
+    pub base0f: String,
+}
+
+impl ThemePalette {
+    pub fn from_base16_slots(slots: [&str; 16]) -> Self {
+        Self {
+            base00: slots[0].to_string(),
+            base01: slots[1].to_string(),
+            base02: slots[2].to_string(),
+            base03: slots[3].to_string(),
+            base04: slots[4].to_string(),
+            base05: slots[5].to_string(),
+            base06: slots[6].to_string(),
+            base07: slots[7].to_string(),
+            base08: slots[8].to_string(),
+            base09: slots[9].to_string(),
+            base0a: slots[10].to_string(),
+            base0b: slots[11].to_string(),
+            base0c: slots[12].to_string(),
+            base0d: slots[13].to_string(),
+            base0e: slots[14].to_string(),
+            base0f: slots[15].to_string(),
+        }
+    }
+
+    pub fn fzf_options(&self) -> String {
+        format!(
+            "--color=bg:{},bg+:{},fg:{},fg+:{}\
+             ,hl:{},hl+:{},info:{},marker:{}\
+             ,prompt:{},spinner:{},pointer:{},header:{}",
+            self.base00,
+            self.base01,
+            self.base04,
+            self.base06,
+            self.base0d,
+            self.base0d,
+            self.base0a,
+            self.base0c,
+            self.base0a,
+            self.base0c,
+            self.base0c,
+            self.base0d,
+        )
+    }
+
+    pub fn terminal_osc_sequence(&self) -> String {
+        let colors = [
+            &self.base00,
+            &self.base08,
+            &self.base0b,
+            &self.base0a,
+            &self.base0d,
+            &self.base0e,
+            &self.base0c,
+            &self.base05,
+            &self.base03,
+            &self.base08,
+            &self.base0b,
+            &self.base0a,
+            &self.base0d,
+            &self.base0e,
+            &self.base0c,
+            &self.base07,
+        ];
+        let mut sequence = String::new();
+        for (index, color) in colors.iter().enumerate() {
+            sequence.push_str(&format!("\x1b]4;{index};{color}\x07"));
+        }
+        sequence
+            .push_str(&format!("\x1b]10;{}\x07\x1b]11;{}\x07\x1b]12;{}\x07", self.base05, self.base00, self.base05));
+        sequence
+    }
+}
+
+/// Dark and light palettes read from NOTA config.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThemePalettes {
+    pub dark: ThemePalette,
+    pub light: ThemePalette,
+}
+
+impl ThemePalettes {
+    pub fn for_mode(&self, mode: ThemeMode) -> &ThemePalette {
+        match mode {
+            ThemeMode::Dark => &self.dark,
+            ThemeMode::Light => &self.light,
+        }
+    }
+}
+
+/// Native adapter binaries used only where the platform exposes no
+/// stable Rust API. These are direct concern adapters, not shell
+/// scripts and not user-configured theme launchers.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ThemeAdapters {
+    pub dconf: Option<PathBuf>,
+    pub emacsclient: Option<PathBuf>,
+}
+
 /// One scheduled theme switch — at this trigger, become this mode.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ThemeWaypoint {
@@ -59,11 +229,6 @@ pub struct ThemeWaypoint {
 }
 
 /// The theme axis's schedule.
-///
-/// Either a single [`Manual`](ThemeSchedule::Manual) value (no
-/// scheduled fires; the daemon only switches when commanded), or
-/// a [`Scheduled`](ThemeSchedule::Scheduled) list of waypoints
-/// plus a default mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThemeSchedule {
     Manual(ThemeMode),
@@ -81,8 +246,7 @@ impl ThemeSchedule {
         }
     }
 
-    /// The mode that holds when no waypoint applies (for Manual,
-    /// the manual value itself).
+    /// The mode that holds when no waypoint applies.
     pub fn default_mode(&self) -> ThemeMode {
         match self {
             ThemeSchedule::Manual(mode) => *mode,
@@ -94,77 +258,304 @@ impl ThemeSchedule {
 /// The full theme-axis configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemeAxis {
-    /// The shell script the daemon spawns to apply a theme.
-    pub apply_command: ApplyCommand,
-    /// The theme schedule.
+    pub concerns: Vec<ThemeConcern>,
+    pub palettes: ThemePalettes,
+    pub adapters: ThemeAdapters,
+    pub font_point_size: u8,
     pub schedule: ThemeSchedule,
 }
 
-/// Applies theme changes through the configured external script.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
+struct ThemeApplyContext {
+    palettes: ThemePalettes,
+    adapters: ThemeAdapters,
+    font_point_size: u8,
+}
+
+/// Applies theme changes through independent native concern actors.
+#[derive(Clone)]
 pub struct ThemeApplier {
-    apply_command: ApplyCommand,
+    actors: Vec<ThemeActor>,
 }
 
 impl ThemeApplier {
-    pub fn from_apply_command(apply_command: ApplyCommand) -> Self {
-        Self { apply_command }
+    pub fn from_axis(axis: ThemeAxis) -> Self {
+        let context = Arc::new(ThemeApplyContext {
+            palettes: axis.palettes,
+            adapters: axis.adapters,
+            font_point_size: axis.font_point_size,
+        });
+        Self {
+            actors: axis.concerns.into_iter().map(|concern| ThemeActor::spawn(concern, Arc::clone(&context))).collect(),
+        }
     }
 
-    pub fn spawn(&self, mode: ThemeMode) -> Result<ThemeApplyProcess> {
-        let command = self.apply_command.to_string();
-        let child = tokio::process::Command::new(self.apply_command.as_path())
-            .arg(mode.as_str())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|source| Error::ThemeApply {
-                command: command.clone(),
-                mode: mode.to_string(),
-                message: source.to_string(),
-            })?;
-
-        Ok(ThemeApplyProcess { child, command, mode })
-    }
-
-    pub async fn apply(&self, mode: ThemeMode) -> Result<()> {
-        self.spawn(mode)?.wait().await
+    pub fn apply(&self, mode: ThemeMode) -> Result<()> {
+        for actor in &self.actors {
+            actor.apply(mode)?;
+        }
+        Ok(())
     }
 }
 
-/// A spawned theme application process.
-///
-/// Dropping this value kills the process, so aborted daemon tasks
-/// cannot leave older theme applications racing newer requests.
-pub struct ThemeApplyProcess {
-    child: Child,
-    command: String,
-    mode: ThemeMode,
+#[derive(Clone)]
+struct ThemeActor {
+    concern: ThemeConcern,
+    sender: UnboundedSender<ThemeMode>,
 }
 
-impl ThemeApplyProcess {
-    pub async fn wait(self) -> Result<()> {
-        let output = self.child.wait_with_output().await.map_err(|source| Error::ThemeApply {
-            command: self.command.clone(),
-            mode: self.mode.to_string(),
-            message: source.to_string(),
-        })?;
+impl ThemeActor {
+    fn spawn(concern: ThemeConcern, context: Arc<ThemeApplyContext>) -> Self {
+        let (sender, receiver) = unbounded_channel();
+        tokio::spawn(ThemeConcernActor::new(concern, context, receiver).run());
+        Self { concern, sender }
+    }
 
-        if output.status.success() {
-            return Ok(());
+    fn apply(&self, mode: ThemeMode) -> Result<()> {
+        self.sender.send(mode).map_err(|_| Error::Daemon { message: format!("{} theme actor is closed", self.concern) })
+    }
+}
+
+struct ThemeConcernActor {
+    concern: ThemeConcern,
+    context: Arc<ThemeApplyContext>,
+    receiver: UnboundedReceiver<ThemeMode>,
+    active: Option<AbortHandle>,
+}
+
+impl ThemeConcernActor {
+    fn new(concern: ThemeConcern, context: Arc<ThemeApplyContext>, receiver: UnboundedReceiver<ThemeMode>) -> Self {
+        Self { concern, context, receiver, active: None }
+    }
+
+    async fn run(mut self) {
+        while let Some(mut mode) = self.receiver.recv().await {
+            while let Ok(next) = self.receiver.try_recv() {
+                mode = next;
+            }
+            self.start(mode);
         }
 
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let message = if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            format!("exit status {}", output.status)
+        if let Some(handle) = self.active.take() {
+            handle.abort();
+        }
+    }
+
+    fn start(&mut self, mode: ThemeMode) {
+        if let Some(handle) = self.active.take() {
+            handle.abort();
+        }
+
+        let concern = self.concern;
+        let context = Arc::clone(&self.context);
+        let handle = tokio::spawn(async move {
+            if let Err(error) = concern.apply(mode, context).await {
+                eprintln!("chroma-daemon {concern} theme concern error: {error}");
+            }
+        });
+        self.active = Some(handle.abort_handle());
+    }
+}
+
+struct TerminalThemeConcern {
+    mode: ThemeMode,
+    palette: ThemePalette,
+}
+
+impl TerminalThemeConcern {
+    fn new(mode: ThemeMode, palette: ThemePalette) -> Self {
+        Self { mode, palette }
+    }
+
+    async fn apply(self) -> Result<()> {
+        let state_dir = state_home()?.join("chroma");
+        tokio::fs::create_dir_all(&state_dir).await?;
+        tokio::fs::write(state_dir.join("current-mode"), format!("{}\n", self.mode)).await?;
+        tokio::fs::write(state_dir.join("wezterm-reload"), format!("{}\n", now_nanos())).await?;
+        tokio::fs::write(
+            state_dir.join("fzf-theme.sh"),
+            format!("export FZF_DEFAULT_OPTS=\"$FZF_DEFAULT_OPTS {}\"\n", self.palette.fzf_options()),
+        )
+        .await?;
+        Self::broadcast_terminal_colors(self.palette.terminal_osc_sequence()).await
+    }
+
+    async fn broadcast_terminal_colors(sequence: String) -> Result<()> {
+        let mut entries = match tokio::fs::read_dir("/dev/pts").await {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
         };
 
-        Err(Error::ThemeApply { command: self.command, mode: self.mode.to_string(), message })
+        while let Some(entry) = entries.next_entry().await? {
+            if !entry.file_name().to_string_lossy().chars().all(|character| character.is_ascii_digit()) {
+                continue;
+            }
+            let path = entry.path();
+            let sequence = sequence.clone();
+            tokio::spawn(async move {
+                let _ = timeout(Duration::from_millis(200), async move {
+                    let mut file = tokio::fs::OpenOptions::new().write(true).open(path).await?;
+                    file.write_all(sequence.as_bytes()).await
+                })
+                .await;
+            });
+        }
+        Ok(())
     }
+}
+
+struct DesktopThemeConcern<'a> {
+    mode: ThemeMode,
+    adapters: &'a ThemeAdapters,
+}
+
+impl<'a> DesktopThemeConcern<'a> {
+    fn new(mode: ThemeMode, adapters: &'a ThemeAdapters) -> Self {
+        Self { mode, adapters }
+    }
+
+    async fn apply(self) -> Result<()> {
+        if let Some(dconf) = &self.adapters.dconf {
+            self.write_dconf(dconf).await?;
+        }
+        self.write_gtk_settings().await
+    }
+
+    async fn write_dconf(&self, dconf: &Path) -> Result<()> {
+        let color_scheme = if self.mode == ThemeMode::Dark { "'prefer-dark'" } else { "'prefer-light'" };
+        let gtk_theme = if self.mode == ThemeMode::Dark { "'adw-gtk3-dark'" } else { "'adw-gtk3'" };
+        let icon_theme = if self.mode == ThemeMode::Dark { "'Papirus-Dark'" } else { "'Papirus-Light'" };
+        self.run_dconf_write(dconf, "/org/gnome/desktop/interface/color-scheme", color_scheme).await?;
+        self.run_dconf_write(dconf, "/org/gnome/desktop/interface/gtk-theme", gtk_theme).await?;
+        self.run_dconf_write(dconf, "/org/gnome/desktop/interface/icon-theme", icon_theme).await
+    }
+
+    async fn run_dconf_write(&self, dconf: &Path, key: &str, value: &str) -> Result<()> {
+        let mut child = tokio::process::Command::new(dconf)
+            .args(["write", key, value])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()?;
+
+        match timeout(Duration::from_secs(1), child.wait()).await {
+            Ok(Ok(status)) if status.success() => Ok(()),
+            Ok(Ok(status)) => Err(Error::Daemon { message: format!("dconf write {key} exited with {status}") }),
+            Ok(Err(error)) => Err(error.into()),
+            Err(_) => {
+                let _ = child.kill().await;
+                Err(Error::Daemon { message: format!("dconf write {key} timed out") })
+            }
+        }
+    }
+
+    async fn write_gtk_settings(&self) -> Result<()> {
+        let config_home = config_home()?;
+        let gtk_theme = if self.mode == ThemeMode::Dark { "adw-gtk3-dark" } else { "adw-gtk3" };
+        let icon_theme = if self.mode == ThemeMode::Dark { "Papirus-Dark" } else { "Papirus-Light" };
+        let prefer_dark = if self.mode == ThemeMode::Dark { "true" } else { "false" };
+        let text = format!(
+            "[Settings]\n\
+             gtk-theme-name={gtk_theme}\n\
+             gtk-cursor-theme-name=Bibata-Modern-Classic\n\
+             gtk-cursor-theme-size=24\n\
+             gtk-font-name=DejaVu Sans 12\n\
+             gtk-icon-theme-name={icon_theme}\n\
+             gtk-application-prefer-dark-theme={prefer_dark}\n"
+        );
+        for version in ["gtk-3.0", "gtk-4.0"] {
+            let directory = config_home.join(version);
+            tokio::fs::create_dir_all(&directory).await?;
+            tokio::fs::write(directory.join("settings.ini"), &text).await?;
+        }
+        Ok(())
+    }
+}
+
+struct GhosttyThemeConcern {
+    palette: ThemePalette,
+    font_point_size: u8,
+}
+
+impl GhosttyThemeConcern {
+    fn new(palette: ThemePalette, font_point_size: u8) -> Self {
+        Self { palette, font_point_size }
+    }
+
+    async fn apply(self) -> Result<()> {
+        let directory = config_home()?.join("ghostty");
+        tokio::fs::create_dir_all(&directory).await?;
+        let config = format!(
+            "font-family = IosevkaTerm Nerd Font\n\
+             font-size = {}\n\
+             window-decoration = false\n\
+             gtk-titlebar = false\n\
+             window-theme = ghostty\n\
+             background = {}\n\
+             foreground = {}\n",
+            self.font_point_size, self.palette.base00, self.palette.base05
+        );
+        tokio::fs::write(directory.join("config"), config).await?;
+        Ok(())
+    }
+}
+
+struct EmacsThemeConcern<'a> {
+    mode: ThemeMode,
+    adapters: &'a ThemeAdapters,
+}
+
+impl<'a> EmacsThemeConcern<'a> {
+    fn new(mode: ThemeMode, adapters: &'a ThemeAdapters) -> Self {
+        Self { mode, adapters }
+    }
+
+    async fn apply(self) -> Result<()> {
+        let Some(emacsclient) = &self.adapters.emacsclient else {
+            return Ok(());
+        };
+        let theme = if self.mode == ThemeMode::Dark { "ignis-dark" } else { "ignis-light" };
+        let expression = format!(
+            "(progn (add-to-list 'custom-theme-load-path \"$HOME/.config/emacs-ignis-themes\") \
+             (mapc #'disable-theme custom-enabled-themes) (load-theme '{theme} t))"
+        );
+        let mut child = tokio::process::Command::new(emacsclient)
+            .args(["--eval", &expression])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()?;
+
+        match timeout(Duration::from_secs(2), child.wait()).await {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(error)) => Err(error.into()),
+            Err(_) => {
+                let _ = child.kill().await;
+                Err(Error::Daemon { message: "emacsclient theme update timed out".into() })
+            }
+        }
+    }
+}
+
+fn state_home() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from) {
+        return Ok(path);
+    }
+    Ok(home_directory()?.join(".local/state"))
+}
+
+fn config_home() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from) {
+        return Ok(path);
+    }
+    Ok(home_directory()?.join(".config"))
+}
+
+fn home_directory() -> Result<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| Error::Config { message: "HOME is not set".into() })
+}
+
+fn now_nanos() -> u128 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or_default()
 }

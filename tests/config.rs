@@ -1,8 +1,6 @@
-use chroma::{ConfigFile, ThemeApplier, ThemeMode};
+use chroma::{ConfigFile, RampTrigger, ThemeConcern, ThemeMode, ThemeSchedule};
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
 use tempfile::TempDir;
 
 struct Fixture {
@@ -14,93 +12,141 @@ impl Fixture {
         Self { temporary_directory: tempfile::tempdir().expect("create tempdir") }
     }
 
-    fn path(&self, name: &str) -> PathBuf {
-        self.temporary_directory.path().join(name)
-    }
-
-    fn write_config(&self, apply_command: &Path) -> PathBuf {
-        let config = self.path("config.nota");
-        fs::write(
-            &config,
-            format!(
-                r#"(Config
-  (Theme
-    (ApplyCommand "{}")
-    (Schedule (Manual Light)))
-  (Warmth (Schedule (Manual Neutral)))
-  (Brightness (Schedule (Manual Bright))))"#,
-                apply_command.display()
-            ),
-        )
-        .expect("write config");
+    fn write_config(&self, text: &str) -> PathBuf {
+        let config = self.temporary_directory.path().join("config.nota");
+        fs::write(&config, text).expect("write config");
         config
-    }
-
-    fn write_apply_script(&self) -> (PathBuf, PathBuf) {
-        let log = self.path("theme.log");
-        let script = self.path("apply-theme");
-        let shell = std::env::var("CHROMA_TEST_SHELL").unwrap_or_else(|_| "/usr/bin/env bash".into());
-        fs::write(&script, format!("#!{shell}\nset -euo pipefail\nprintf '%s\\n' \"$1\" > '{}'\n", log.display()))
-            .expect("write script");
-        let mut permissions = fs::metadata(&script).expect("script metadata").permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(&script, permissions).expect("make script executable");
-        (script, log)
-    }
-
-    fn write_slow_apply_script(&self) -> (PathBuf, PathBuf) {
-        let log = self.path("slow-theme.log");
-        let script = self.path("apply-slow-theme");
-        let shell = std::env::var("CHROMA_TEST_SHELL").unwrap_or_else(|_| "/usr/bin/env bash".into());
-        fs::write(
-            &script,
-            format!("#!{shell}\nset -euo pipefail\nsleep 0.5\nprintf '%s\\n' \"$1\" > '{}'\n", log.display()),
-        )
-        .expect("write script");
-        let mut permissions = fs::metadata(&script).expect("script metadata").permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(&script, permissions).expect("make script executable");
-        (script, log)
     }
 }
 
 #[test]
-fn config_file_extracts_theme_apply_command_from_nota_config() {
+fn config_file_extracts_native_theme_axis_from_nota_config() {
     let fixture = Fixture::new();
-    let (script, _) = fixture.write_apply_script();
-    let config = fixture.write_config(&script);
+    let config = fixture.write_config(NATIVE_CONFIG);
 
-    let apply_command = ConfigFile::from_path(config).theme_apply_command().expect("apply command decodes");
+    let theme = ConfigFile::from_path(config).theme_axis().expect("theme axis decodes");
 
-    assert_eq!(apply_command.as_path(), script.as_path());
+    assert_eq!(theme.concerns, vec![ThemeConcern::Terminal, ThemeConcern::Desktop, ThemeConcern::Ghostty]);
+    assert_eq!(
+        theme.adapters.dconf.as_deref().map(|path| path.to_string_lossy().to_string()),
+        Some("/bin/dconf".into())
+    );
+    assert_eq!(theme.font_point_size, 14);
+    assert_eq!(theme.palettes.dark.base00, "#000000");
+    assert_eq!(theme.palettes.light.base05, "#3d3530");
+    let ThemeSchedule::Scheduled { waypoints, default } = theme.schedule else {
+        panic!("expected scheduled theme");
+    };
+    assert_eq!(default, ThemeMode::Dark);
+    assert_eq!(waypoints.len(), 2);
+    assert_eq!(waypoints[0].mode, ThemeMode::Light);
+    assert!(matches!(waypoints[0].trigger, RampTrigger::CivilDawn(_)));
 }
 
-#[tokio::test]
-async fn theme_applier_passes_lowercase_mode_to_configured_script() {
+#[test]
+fn config_file_decodes_manual_theme_schedule_from_nota_config() {
     let fixture = Fixture::new();
-    let (script, log) = fixture.write_apply_script();
-    let apply_command =
-        ConfigFile::from_path(fixture.write_config(&script)).theme_apply_command().expect("apply command decodes");
-    let applier = ThemeApplier::from_apply_command(apply_command);
+    let config = fixture.write_config(&NATIVE_CONFIG.replace(
+        "(Schedule
+      (Waypoint (CivilDawn (SignedMinutes 0)) Light)
+      (Waypoint (CivilDusk (SignedMinutes 0)) Dark)
+      (Default Dark))",
+        "(Schedule (Manual Light))",
+    ));
 
-    applier.apply(ThemeMode::Dark).await.expect("theme applies");
+    let theme = ConfigFile::from_path(config).theme_axis().expect("theme axis decodes");
 
-    assert_eq!(fs::read_to_string(log).expect("read log"), "dark\n");
+    assert_eq!(theme.schedule, ThemeSchedule::Manual(ThemeMode::Light));
 }
 
-#[tokio::test]
-async fn theme_applier_spawns_without_waiting_for_apply_script_to_finish() {
+#[test]
+fn hc_chroma_001_apply_command_records_are_rejected_not_interpreted() {
     let fixture = Fixture::new();
-    let (script, log) = fixture.write_slow_apply_script();
-    let apply_command =
-        ConfigFile::from_path(fixture.write_config(&script)).theme_apply_command().expect("apply command decodes");
-    let applier = ThemeApplier::from_apply_command(apply_command);
+    let config = fixture.write_config("(Config (Theme (ApplyCommand \"/tmp/apply-theme\")))");
 
-    let start = Instant::now();
-    let process = applier.spawn(ThemeMode::Light).expect("theme apply process spawns");
+    let error = ConfigFile::from_path(config).theme_axis().expect_err("apply command must fail");
 
-    assert!(start.elapsed() < Duration::from_millis(100), "spawn waited for the slow apply script");
-
-    process.wait().await.expect("theme applies");
-    assert_eq!(fs::read_to_string(log).expect("read log"), "light\n");
+    assert!(error.to_string().contains("removed shell-apply architecture"));
 }
+
+#[test]
+fn hc_chroma_002_apply_targets_records_are_rejected_not_migrated() {
+    let fixture = Fixture::new();
+    let config = fixture.write_config("(Config (Theme (ApplyTargets (Target Terminal \"/tmp/apply-terminal\"))))");
+
+    let error = ConfigFile::from_path(config).theme_axis().expect_err("apply targets must fail");
+
+    assert!(error.to_string().contains("removed shell-apply architecture"));
+}
+
+#[test]
+fn hc_chroma_003_legacy_theme_concern_is_rejected_not_retained() {
+    let fixture = Fixture::new();
+    let config =
+        fixture.write_config(&NATIVE_CONFIG.replace("(Concerns Terminal Desktop Ghostty)", "(Concerns Legacy)"));
+
+    let error = ConfigFile::from_path(config).theme_axis().expect_err("legacy concern must fail");
+
+    assert!(error.to_string().contains("removed shell-apply architecture"));
+}
+
+#[test]
+fn hc_chroma_004_yaml_data_inputs_are_rejected_in_favor_of_nota() {
+    let fixture = Fixture::new();
+    let config = fixture.write_config(&NATIVE_CONFIG.replace("(FontPointSize 14)", "(PaletteFile \"ignis.yaml\")"));
+
+    let error = ConfigFile::from_path(config).theme_axis().expect_err("yaml input must fail");
+
+    assert!(error.to_string().contains("YAML inputs are forbidden"));
+}
+
+const NATIVE_CONFIG: &str = r##"
+(Config
+  (Theme
+    (Concerns Terminal Desktop Ghostty)
+    (Palettes
+      (Dark
+        (Base00 "#000000")
+        (Base01 "#1a1a1a")
+        (Base02 "#2d2d2d")
+        (Base03 "#505050")
+        (Base04 "#b0b0b0")
+        (Base05 "#d0d0d0")
+        (Base06 "#e0e0e0")
+        (Base07 "#ffffff")
+        (Base08 "#ff0066")
+        (Base09 "#ff8800")
+        (Base0A "#f5c000")
+        (Base0B "#00cc44")
+        (Base0C "#cc44ff")
+        (Base0D "#e040a0")
+        (Base0E "#bb44ee")
+        (Base0F "#ff5577"))
+      (Light
+        (Base00 "#faf5f0")
+        (Base01 "#efe8e2")
+        (Base02 "#ddd5ce")
+        (Base03 "#887a70")
+        (Base04 "#6a5e55")
+        (Base05 "#3d3530")
+        (Base06 "#2a2420")
+        (Base07 "#1a1510")
+        (Base08 "#cc0044")
+        (Base09 "#d06600")
+        (Base0A "#b89000")
+        (Base0B "#1a8a30")
+        (Base0C "#9930cc")
+        (Base0D "#b03080")
+        (Base0E "#8822bb")
+        (Base0F "#cc3355")))
+    (Adapters
+      (Dconf "/bin/dconf")
+      (Emacsclient "/bin/emacsclient"))
+    (FontPointSize 14)
+    (Schedule
+      (Waypoint (CivilDawn (SignedMinutes 0)) Light)
+      (Waypoint (CivilDusk (SignedMinutes 0)) Dark)
+      (Default Dark)))
+  (Warmth (Schedule (Manual Neutral)))
+  (Brightness (Schedule (Manual Bright))))
+"##;

@@ -33,10 +33,10 @@ trade-offs against the alternative (separate `warmth` and
 These are non-negotiable; an edit that breaks them needs a
 report, not a pull request.
 
-1. **Theme apply lives outside the daemon.** Chroma invokes a
-   configured `ApplyCommand` shell script for theme switches;
-   it does not embed dconf / GTK / Ghostty / OSC / Emacs
-   knowledge. The script is NixOS-specific; the daemon is not.
+1. **Theme apply is native concern actors.** Chroma owns
+   terminal, desktop/GTK, Ghostty, and Emacs theme application
+   directly. There is no configured apply command, no shell
+   script boundary, and no retained legacy target schema.
 
 2. **rkyv on the wire, NOTA at the human boundary.** Daemon ↔
    CLI is the signal pattern (length-prefixed rkyv frames over
@@ -44,12 +44,11 @@ report, not a pull request.
    and the printed reply. The daemon never re-parses NOTA from
    the CLI request frame.
 
-3. **State lives in redb + rkyv, not text files.** No
-   `~/.local/state/chroma/current-mode` text file; no JSON
-   sidecar; no flat-file logs as durable state. The
-   `~/.local/state/darkman/current-mode` and `fzf-theme.sh`
-   files are written by the *apply command* (because the zsh
-   init hook reads them), not by the daemon.
+3. **State lives in redb + rkyv, not ad-hoc data formats.** No
+   JSON sidecars and no YAML/YML Chroma inputs. Terminal helper
+   files may exist only as integration outputs for tools that
+   cannot read the daemon state directly; they are not Chroma's
+   source of truth.
 
 4. **Push, not poll.** Schedule fires are `tokio::time::sleep_until`
    deadlines (timerfd-backed). Geoclue is a zbus signal
@@ -77,10 +76,9 @@ report, not a pull request.
 
 ## What this repo does NOT own
 
-- The Ignis colour palette (`ignis.yaml`, `ignis-light.yaml`).
-  Lives in `CriomOS-home` and `Stylix`. Chroma applies it via
-  the apply command; it does not edit, generate, or version
-  the YAML.
+- The Ignis colour palette's authorship. Palette data enters
+  Chroma as NOTA; Chroma applies it but does not edit,
+  generate, or version it.
 - The wl-gammarelay-rs daemon. Chroma is its sole consumer; the
   daemon's lifecycle is owned by the home-manager systemd unit.
 - The geoclue2 service. Subscribed, not embedded.
@@ -88,8 +86,9 @@ report, not a pull request.
   declares `After=wl-gammarelay-rs.service` and
   `WantedBy=graphical-session.target`; the rest of the boot
   graph is the platform's.
-- Per-app theme adapters (Firefox, Electron, Qt). They read
-  dconf / portal; the apply command writes dconf.
+- Per-app internals (Firefox, Electron, Qt). They read dconf /
+  portal / GTK state; Chroma owns the desktop concern that
+  updates those signals.
 
 If a change touches one of these, the change goes upstream
 (CriomOS-home, Stylix, the relevant project), not into chroma.
@@ -134,6 +133,8 @@ If a change touches one of these, the change goes upstream
   crate per repo.
 - `~/primary/skills/jj.md` — version-control discipline.
 - `~/primary/skills/nix-discipline.md` — flake hygiene.
+- `HARD-CONSTRAINTS.md` — non-negotiable architecture locks
+  and their tests.
 - `lore/rust/ractor.md` — actor template, perfect-specificity
   messages, supervision.
 - `lore/rust/rkyv.md` — wire-format discipline, feature pinning.

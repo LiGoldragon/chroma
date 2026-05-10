@@ -16,7 +16,7 @@ use crate::warmth::{KelvinTemperature, WarmthLevel};
 /// What the CLI sends to the daemon.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaSum, Debug, Clone, PartialEq)]
 pub enum Request {
-    /// Switch to a theme mode (apply runs the configured shell script).
+    /// Switch to a theme mode through native concern actors.
     SetTheme { mode: ThemeMode },
     /// Read the current theme mode.
     GetTheme {},

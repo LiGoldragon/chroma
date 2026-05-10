@@ -22,13 +22,13 @@ report is
   of decisions**. The axes share infrastructure (one config, one
   redb, one geoclue subscription, one CLI, one socket); their
   scheduled events do not share fires.
-- **Theme apply boundary.** `chroma` invokes a configured apply
-  command (a home-manager-built shell script) for theme
-  switches. The daemon stays NixOS-agnostic; the apply script
-  stays NixOS-specific. `SetTheme` returns `(Accepted)` after
-  spawning the apply work; do not make CLI requests wait on
-  desktop mutation. Don't fold dconf / GTK ini / terminal OSC
-  startup / emacsclient logic into the daemon.
+- **Native theme concerns.** `chroma` owns terminal,
+  desktop/GTK, Ghostty, and Emacs theme application as
+  independent concern actors. `SetTheme` returns `(Accepted)`
+  after those actors own the message; do not make CLI requests
+  wait on desktop mutation. Do not add configured apply
+  commands, shell script boundaries, or retained legacy target
+  schemas.
 - **Push-not-poll throughout.** Geoclue location pushes via
   zbus signal; deadlines push via `tokio::time::sleep_until`
   (timerfd-backed); inotify pushes config reloads; UDS frames
@@ -41,6 +41,8 @@ report is
   `~/primary/repos/signal`). The CLI parses NOTA argv into the
   typed request, archives it, and prints the rkyv-deserialised
   reply as NOTA. The daemon never re-parses NOTA from the CLI.
+- **NOTA-only data inputs.** Chroma config and palette data are
+  NOTA. YAML/YML inputs are rejected at the Chroma boundary.
 - **redb + rkyv for state.** Persistent state lives in
   `$XDG_STATE_HOME/chroma/state.redb`. Values are rkyv-archived
   domain records. State is read on boot and re-applied to
@@ -93,5 +95,6 @@ prompts (always `-m '<msg>'`).
 - `~/primary/skills/beauty.md` — beauty as criterion.
 - `lore/rust/ractor.md` — actor template.
 - `lore/rust/rkyv.md` — wire format discipline.
+- `HARD-CONSTRAINTS.md` — architecture locks and matching tests.
 - `~/primary/repos/signal` — canonical signal pattern reference.
 - `~/primary/repos/lojix-cli` — canonical NOTA-on-argv CLI shape.

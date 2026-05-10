@@ -35,9 +35,9 @@ pub enum Error {
     #[error("daemon: {message}")]
     Daemon { message: String },
 
-    /// The configured theme apply command failed.
-    #[error("theme apply command {command} failed for {mode}: {message}")]
-    ThemeApply { command: String, mode: String, message: String },
+    /// A native theme concern failed while applying a mode.
+    #[error("theme concern {concern} failed for {mode}: {message}")]
+    ThemeConcern { concern: String, mode: String, message: String },
 }
 
 /// Crate-local result alias.

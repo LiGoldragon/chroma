@@ -21,22 +21,20 @@ Chroma owns:
 - the persisted current value per axis (in redb + rkyv)
 - the typed CLI request grammar (`Request` / `Response`)
 - the IPC contract between CLI and daemon (rkyv-on-UDS)
-- the configuration grammar (`Config`, NOTA on disk)
+- the configuration and palette grammar (`Config`, NOTA on disk)
 - the geoclue2 subscription (when twilight triggers are used)
 - the orchestration of ramps (start, interrupt, replace)
+- the native theme application concerns: terminal, desktop/GTK,
+  Ghostty, and Emacs
 
 Chroma does **not** own:
 
-- the GTK / dconf / Ghostty / Emacs / OSC / fzf application of a
-  theme — that lives in the home-manager-built
-  `chroma-apply-theme` shell script, invoked by the daemon as an
-  opaque executable
 - the gamma compositor — wl-gammarelay-rs remains the DBus
   daemon that talks to the wlroots compositor; chroma is its
   sole consumer
-- the colour palette itself — Ignis (`ignis.yaml`,
-  `ignis-light.yaml`) is the palette; chroma applies it but
-  does not generate, edit, or version it
+- the colour palette's authorship — Ignis is the palette;
+  chroma reads it as NOTA data and applies it, but does not
+  generate, edit, or version the palette
 - the geolocation source — geoclue2 is the upstream signal;
   chroma subscribes but does not bypass or replicate
 
@@ -44,7 +42,7 @@ Chroma does **not** own:
 
 | Axis | Domain values | Apply target |
 |---|---|---|
-| Theme | `ThemeMode { Dark, Light }` | configured `ApplyCommand` (shell script) |
+| Theme | `ThemeMode { Dark, Light }` | native concern actors |
 | Warmth | `WarmthLevel { Cold..Warmest }` + `KelvinTemperature` | wl-gammarelay-rs DBus `Temperature` |
 | Brightness | `BrightnessLevel { Dim..Brightest }` + `BrightnessPercent` | wl-gammarelay-rs DBus `Brightness` |
 
@@ -55,11 +53,10 @@ Each axis has:
 - its own redb table (one row, current value)
 - its own CLI verbs (`SetTheme`, `SetWarmth`, `StepBrightnessUp`, …)
 
-Theme has no ramp, but its external apply script is always
-spawned outside the CLI request path. `SetTheme` records the
-requested mode, starts a latest-wins apply worker, and returns
-`(Accepted)` immediately after the process has spawned. Warmth
-and brightness support both instant (`SetWarmth`,
+Theme has no ramp. `SetTheme` records the requested mode,
+enqueues it to one latest-wins actor per theme concern, and
+returns `(Accepted)` immediately after those actors own the
+message. Warmth and brightness support both instant (`SetWarmth`,
 `SetBrightness`) and gradual (`StartWarmthRamp`,
 `StartBrightnessRamp`) transitions.
 
@@ -68,7 +65,11 @@ and brightness support both instant (`SetWarmth`,
 ```
 Supervisor
 ├── StateStore                       (redb handle; one row per axis)
-├── ThemeApplier                     (apply-command path)
+├── ThemeApplier                     (native concern fanout)
+│   ├── TerminalThemeConcern
+│   ├── DesktopThemeConcern
+│   ├── GhosttyThemeConcern
+│   └── EmacsThemeConcern
 ├── WarmthApplier                    (zbus to wl-gammarelay-rs Temperature)
 │   └── WarmthRampSession*           (per active ramp; spawn-linked)
 ├── BrightnessApplier                (zbus to wl-gammarelay-rs Brightness)
@@ -114,7 +115,15 @@ on inotify push. Parses into a typed `Config`:
 
 ```
 (Config
-  (Theme       (ApplyCommand <path>) (Schedule …))
+  (Theme
+    (Concerns Terminal Desktop Ghostty Emacs)
+    (Palettes
+      (Dark  (Base00 "#000000") ... (Base0F "#ff5577"))
+      (Light (Base00 "#faf5f0") ... (Base0F "#cc3355")))
+    (Adapters
+      (Dconf <path>)
+      (Emacsclient <path>))
+    (Schedule …))
   (Warmth      (Schedule …))
   (Brightness  (Schedule …)))
 ```
@@ -123,7 +132,8 @@ Each axis schedule is a list of `Waypoint` records + a `Default`.
 Triggers: `(CivilDawn (SignedMinutes <n>))`,
 `(CivilDusk (SignedMinutes <n>))`, `(TimeOfDay <h> <m>)`.
 The geoclue subscription opens iff any axis uses a twilight
-trigger.
+trigger. Data-format inputs at the Chroma boundary are NOTA; YAML
+and YML inputs are rejected.
 
 ## Persistence
 
@@ -149,23 +159,23 @@ version-skew guard at boot hard-fails on mismatch.
 | In-process: actor ↔ actor | typed Rust values |
 | Daemon ↔ CLI | rkyv-archived `Request` / `Response`, length-prefixed |
 | Daemon ↔ disk (state) | rkyv values inside redb tables |
-| Daemon ↔ disk (config) | NOTA text record (`Config`) |
+| Daemon ↔ disk (config + palettes) | NOTA text record (`Config`) |
 | Daemon ↔ wl-gammarelay-rs | zbus property writes (`Temperature` u16, `Brightness` f64) |
 | Daemon ↔ geoclue2 | zbus signal subscription |
-| Daemon ↔ apply command | process spawn with one positional arg |
+| Daemon ↔ theme concerns | typed Rust values; no apply-command schema |
 | Daemon ↔ human (audit) | NOTA reply printed by the CLI |
 
 JSON / serde appears nowhere in the daemon. The only text
-formats are NOTA (config + CLI) and the apply command's argv;
-all other bytes are rkyv archives.
+format accepted as Chroma input is NOTA (config + CLI); all
+other daemon-owned bytes are rkyv archives.
 
 ## Out of scope (for the first slice)
 
 - per-monitor warmth / brightness (wl-gammarelay-rs is per-output;
   chroma mirrors that today)
 - cross-machine visual sync
-- a freedesktop appearance portal hosted by chroma (apps fall back
-  to dconf, set by the apply command)
+- a freedesktop appearance portal hosted by chroma (apps fall
+  back to dconf / GTK state set by the desktop concern)
 - wallpaper as a fourth axis
 - migration of CLI ↔ daemon transport off rkyv-on-UDS (Persona
   fabric is the future host)

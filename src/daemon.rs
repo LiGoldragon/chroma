@@ -9,10 +9,8 @@
 //!
 //! Per-axis side effects run as detached `tokio::spawn` tasks
 //! where the effect can outlive the request. The state holds an
-//! [`AbortHandle`] per cancellable axis. Any new `SetTheme`,
-//! instant `SetWarmth` / `SetBrightness`, fresh ramp request, or
-//! explicit interrupt aborts the older in-flight work before
-//! taking effect.
+//! [`AbortHandle`] per cancellable gamma axis. Theme application
+//! is delegated to independent latest-wins native concern actors.
 
 use std::sync::Arc;
 
@@ -37,7 +35,6 @@ use crate::wire::{read_frame, socket_path, write_frame};
 struct DaemonState {
     theme_applier: ThemeApplier,
     theme: Mutex<ThemeMode>,
-    theme_apply: Mutex<Option<AbortHandle>>,
     gamma: GammaClient,
     warmth_ramp: Mutex<Option<AbortHandle>>,
     brightness_ramp: Mutex<Option<AbortHandle>>,
@@ -48,7 +45,6 @@ impl DaemonState {
         Arc::new(Self {
             theme_applier,
             theme: Mutex::new(ThemeMode::Light),
-            theme_apply: Mutex::new(None),
             gamma,
             warmth_ramp: Mutex::new(None),
             brightness_ramp: Mutex::new(None),
@@ -60,24 +56,9 @@ impl DaemonState {
     }
 
     async fn set_theme(&self, mode: ThemeMode) -> Result<()> {
-        let process = self.theme_applier.spawn(mode)?;
         *self.theme.lock().await = mode;
-        self.install_theme_apply(process).await;
+        self.theme_applier.apply(mode)?;
         Ok(())
-    }
-
-    /// Replace the theme-apply worker, aborting the previous if any.
-    async fn install_theme_apply(&self, process: crate::theme::ThemeApplyProcess) {
-        let handle = tokio::spawn(async move {
-            if let Err(error) = process.wait().await {
-                eprintln!("chroma-daemon theme apply error: {error}");
-            }
-        });
-
-        let mut guard = self.theme_apply.lock().await;
-        if let Some(old) = guard.replace(handle.abort_handle()) {
-            old.abort();
-        }
     }
 
     /// Abort any active warmth ramp. Idempotent.
@@ -120,7 +101,7 @@ pub async fn run() -> Result<()> {
         std::fs::remove_file(&path)?;
     }
     let listener = UnixListener::bind(&path)?;
-    let theme_applier = ThemeApplier::from_apply_command(ConfigFile::from_default_locations()?.theme_apply_command()?);
+    let theme_applier = ThemeApplier::from_axis(ConfigFile::from_default_locations()?.theme_axis()?);
     let gamma = GammaClient::connect().await?;
     let state = DaemonState::new(theme_applier, gamma);
     eprintln!("chroma-daemon listening on {}", path.display());
