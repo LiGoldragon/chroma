@@ -19,6 +19,7 @@ pub mod error;
 pub mod gamma;
 pub mod request;
 pub mod response;
+pub mod state;
 pub mod theme;
 pub mod time;
 pub mod warmth;
@@ -29,6 +30,7 @@ pub use config::{Config, ConfigFile};
 pub use error::{Error, Result};
 pub use request::Request;
 pub use response::Response;
+pub use state::{ReadStoredState, RecordBrightness, RecordTheme, RecordWarmth, StateStore, StoredVisualState};
 pub use theme::{
     ThemeAdapters, ThemeApplier, ThemeAxis, ThemeConcern, ThemeMode, ThemePalette, ThemePalettes, ThemeSchedule,
     ThemeWaypoint,

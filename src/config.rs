@@ -6,13 +6,13 @@
 use core::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::brightness::BrightnessAxis;
+use crate::brightness::{BrightnessAxis, BrightnessLevel, BrightnessSchedule, BrightnessWaypoint};
 use crate::error::{Error, Result};
 use crate::theme::{
     ThemeAdapters, ThemeAxis, ThemeConcern, ThemeMode, ThemePalette, ThemePalettes, ThemeSchedule, ThemeWaypoint,
 };
-use crate::time::{LocalHour, LocalMinute, RampTrigger, SignedMinutes};
-use crate::warmth::WarmthAxis;
+use crate::time::{LocalHour, LocalMinute, RampDuration, RampTrigger, SignedMinutes};
+use crate::warmth::{WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint};
 use nota_codec::{Lexer, Token};
 
 /// The on-disk Chroma configuration file.
@@ -49,6 +49,12 @@ impl ConfigFile {
         let text = std::fs::read_to_string(&self.path)?;
         ConfigText::new(&text).theme_axis()
     }
+
+    /// Decode the full Chroma config.
+    pub fn config(&self) -> Result<Config> {
+        let text = std::fs::read_to_string(&self.path)?;
+        ConfigText::new(&text).config()
+    }
 }
 
 struct ConfigText<'input> {
@@ -61,14 +67,13 @@ impl<'input> ConfigText<'input> {
     }
 
     fn theme_axis(&self) -> Result<ThemeAxis> {
+        Ok(self.config()?.theme)
+    }
+
+    fn config(&self) -> Result<Config> {
         self.reject_removed_or_non_nota_inputs()?;
-        Ok(ThemeAxis {
-            concerns: self.theme_concerns()?,
-            palettes: self.theme_palettes()?,
-            adapters: self.theme_adapters()?,
-            font_point_size: self.theme_font_point_size()?,
-            schedule: self.theme_schedule()?,
-        })
+        let document = ConfigDocument::parse(self.text)?;
+        document.config()
     }
 
     fn reject_removed_or_non_nota_inputs(&self) -> Result<()> {
@@ -90,320 +95,6 @@ impl<'input> ConfigText<'input> {
             }
         }
         Ok(())
-    }
-
-    fn theme_concerns(&self) -> Result<Vec<ThemeConcern>> {
-        let mut record = RecordSearch::new(self.text);
-        while record.seek("Concerns")? {
-            let mut concerns = Vec::new();
-            loop {
-                match record.next_token()? {
-                    Some(Token::RParen) if concerns.is_empty() => {
-                        return Err(Error::Config { message: "Concerns must name at least one concern".into() });
-                    }
-                    Some(Token::RParen) => return Ok(concerns),
-                    Some(Token::Ident(name)) | Some(Token::Str(name)) => {
-                        concerns.push(ThemeConcern::from_config_name(&name)?);
-                    }
-                    Some(token) => {
-                        return Err(Error::Config {
-                            message: format!("Concerns expected concern names, got {token:?}"),
-                        });
-                    }
-                    None => return Err(Error::Config { message: "Concerns ended before closing paren".into() }),
-                }
-            }
-        }
-        Err(Error::Config { message: "Theme config must contain a Concerns record".into() })
-    }
-
-    fn theme_palettes(&self) -> Result<ThemePalettes> {
-        Ok(ThemePalettes { dark: self.theme_palette("Dark")?, light: self.theme_palette("Light")? })
-    }
-
-    fn theme_palette(&self, name: &str) -> Result<ThemePalette> {
-        let mut record = RecordSearch::new(self.text);
-        while record.seek(name)? {
-            let mut slots: [Option<String>; 16] = std::array::from_fn(|_| None);
-            loop {
-                match record.next_token()? {
-                    Some(Token::RParen) => return palette_from_slots(name, slots),
-                    Some(Token::LParen) => {
-                        let slot = match record.next_token()? {
-                            Some(Token::Ident(slot)) => slot,
-                            Some(token) => {
-                                return Err(Error::Config {
-                                    message: format!("{name} palette expected a BaseXX slot, got {token:?}"),
-                                });
-                            }
-                            None => {
-                                return Err(Error::Config {
-                                    message: format!("{name} palette ended after opening a slot"),
-                                });
-                            }
-                        };
-                        let index = base16_slot_index(&slot)?;
-                        let color = match record.next_token()? {
-                            Some(Token::Str(color)) | Some(Token::Ident(color)) => color,
-                            Some(token) => {
-                                return Err(Error::Config {
-                                    message: format!("{slot} expected a color string, got {token:?}"),
-                                });
-                            }
-                            None => return Err(Error::Config { message: format!("{slot} ended before color") }),
-                        };
-                        record.expect_rparen(&format!("{slot} palette slot"))?;
-                        slots[index] = Some(color);
-                    }
-                    Some(token) => {
-                        return Err(Error::Config {
-                            message: format!("{name} palette expected BaseXX records, got {token:?}"),
-                        });
-                    }
-                    None => {
-                        return Err(Error::Config { message: format!("{name} palette ended before closing paren") });
-                    }
-                }
-            }
-        }
-        Err(Error::Config { message: format!("Theme config must contain a {name} palette record") })
-    }
-
-    fn theme_adapters(&self) -> Result<ThemeAdapters> {
-        let mut record = RecordSearch::new(self.text);
-        while record.seek("Adapters")? {
-            let mut adapters = ThemeAdapters::default();
-            loop {
-                match record.next_token()? {
-                    Some(Token::RParen) => return Ok(adapters),
-                    Some(Token::LParen) => {
-                        let adapter = match record.next_token()? {
-                            Some(Token::Ident(adapter)) => adapter,
-                            Some(token) => {
-                                return Err(Error::Config {
-                                    message: format!("Adapters expected adapter name, got {token:?}"),
-                                });
-                            }
-                            None => {
-                                return Err(Error::Config { message: "Adapters ended after opening record".into() });
-                            }
-                        };
-                        let path = match record.next_token()? {
-                            Some(Token::Str(path)) | Some(Token::Ident(path)) => PathBuf::from(path),
-                            Some(token) => {
-                                return Err(Error::Config {
-                                    message: format!("{adapter} adapter expected path, got {token:?}"),
-                                });
-                            }
-                            None => return Err(Error::Config { message: format!("{adapter} ended before path") }),
-                        };
-                        record.expect_rparen(&format!("{adapter} adapter"))?;
-                        match adapter.as_str() {
-                            "Dconf" => adapters.dconf = Some(path),
-                            "Emacsclient" => adapters.emacsclient = Some(path),
-                            _ => {
-                                return Err(Error::Config { message: format!("unknown adapter {adapter}") });
-                            }
-                        }
-                    }
-                    Some(token) => {
-                        return Err(Error::Config { message: format!("Adapters expected records, got {token:?}") });
-                    }
-                    None => return Err(Error::Config { message: "Adapters ended before closing paren".into() }),
-                }
-            }
-        }
-        Ok(ThemeAdapters::default())
-    }
-
-    fn theme_font_point_size(&self) -> Result<u8> {
-        let mut record = RecordSearch::new(self.text);
-        while record.seek("FontPointSize")? {
-            let size = match record.next_token()? {
-                Some(Token::Int(size)) if size > 0 && size <= u8::MAX as i128 => size as u8,
-                Some(token) => {
-                    return Err(Error::Config {
-                        message: format!("FontPointSize expected a positive integer, got {token:?}"),
-                    });
-                }
-                None => return Err(Error::Config { message: "FontPointSize ended before value".into() }),
-            };
-            record.expect_rparen("FontPointSize")?;
-            return Ok(size);
-        }
-        Ok(12)
-    }
-
-    fn theme_schedule(&self) -> Result<ThemeSchedule> {
-        let mut record = RecordSearch::new(self.text);
-        while record.seek("Schedule")? {
-            return record.parse_theme_schedule();
-        }
-        Err(Error::Config { message: "Theme config must contain a Schedule record".into() })
-    }
-}
-
-struct RecordSearch<'input> {
-    lexer: Lexer<'input>,
-}
-
-impl<'input> RecordSearch<'input> {
-    fn new(text: &'input str) -> Self {
-        Self { lexer: Lexer::new(text) }
-    }
-
-    fn seek(&mut self, name: &str) -> Result<bool> {
-        while let Some(token) = self.lexer.next_token()? {
-            if token != Token::LParen {
-                continue;
-            }
-            match self.lexer.next_token()? {
-                Some(Token::Ident(head)) if head == name => return Ok(true),
-                Some(_) => {}
-                None => return Err(Error::Config { message: format!("{name} search hit an incomplete record") }),
-            }
-        }
-        Ok(false)
-    }
-
-    fn next_token(&mut self) -> Result<Option<Token>> {
-        Ok(self.lexer.next_token()?)
-    }
-
-    fn expect_rparen(&mut self, label: &str) -> Result<()> {
-        match self.lexer.next_token()? {
-            Some(Token::RParen) => Ok(()),
-            Some(token) => Err(Error::Config { message: format!("{label} expected closing paren, got {token:?}") }),
-            None => Err(Error::Config { message: format!("{label} ended before closing paren") }),
-        }
-    }
-
-    fn parse_theme_schedule(&mut self) -> Result<ThemeSchedule> {
-        let mut waypoints = Vec::new();
-        let mut default = ThemeMode::Dark;
-        loop {
-            match self.lexer.next_token()? {
-                Some(Token::RParen) if waypoints.is_empty() => {
-                    return Err(Error::Config { message: "Schedule must contain Manual or Waypoint records".into() });
-                }
-                Some(Token::RParen) => return Ok(ThemeSchedule::Scheduled { waypoints, default }),
-                Some(Token::LParen) => match self.lexer.next_token()? {
-                    Some(Token::Ident(head)) if head == "Manual" => {
-                        let mode = self.parse_theme_mode("Manual")?;
-                        self.expect_rparen("Manual")?;
-                        self.expect_rparen("Schedule")?;
-                        return Ok(ThemeSchedule::Manual(mode));
-                    }
-                    Some(Token::Ident(head)) if head == "Waypoint" => {
-                        waypoints.push(self.parse_theme_waypoint()?);
-                    }
-                    Some(Token::Ident(head)) if head == "Default" => {
-                        default = self.parse_theme_mode("Default")?;
-                        self.expect_rparen("Default")?;
-                    }
-                    Some(Token::Ident(head)) => {
-                        return Err(Error::Config { message: format!("unknown Schedule record {head}") });
-                    }
-                    Some(token) => {
-                        return Err(Error::Config {
-                            message: format!("Schedule expected a record head, got {token:?}"),
-                        });
-                    }
-                    None => return Err(Error::Config { message: "Schedule ended after opening a record".into() }),
-                },
-                Some(token) => {
-                    return Err(Error::Config { message: format!("Schedule expected records, got {token:?}") });
-                }
-                None => return Err(Error::Config { message: "Schedule ended before closing paren".into() }),
-            }
-        }
-    }
-
-    fn parse_theme_waypoint(&mut self) -> Result<ThemeWaypoint> {
-        let trigger = self.parse_ramp_trigger()?;
-        let mode = self.parse_theme_mode("Waypoint")?;
-        self.expect_rparen("Waypoint")?;
-        Ok(ThemeWaypoint { trigger, mode })
-    }
-
-    fn parse_ramp_trigger(&mut self) -> Result<RampTrigger> {
-        match self.lexer.next_token()? {
-            Some(Token::LParen) => {}
-            Some(token) => {
-                return Err(Error::Config { message: format!("Waypoint expected trigger record, got {token:?}") });
-            }
-            None => return Err(Error::Config { message: "Waypoint ended before trigger".into() }),
-        }
-        match self.lexer.next_token()? {
-            Some(Token::Ident(head)) if head == "CivilDawn" => {
-                let offset = self.parse_signed_minutes()?;
-                self.expect_rparen("CivilDawn")?;
-                Ok(RampTrigger::CivilDawn(offset))
-            }
-            Some(Token::Ident(head)) if head == "CivilDusk" => {
-                let offset = self.parse_signed_minutes()?;
-                self.expect_rparen("CivilDusk")?;
-                Ok(RampTrigger::CivilDusk(offset))
-            }
-            Some(Token::Ident(head)) if head == "TimeOfDay" => {
-                let hour = match self.lexer.next_token()? {
-                    Some(Token::Int(hour)) if hour >= 0 => LocalHour::new(hour as u8),
-                    Some(token) => {
-                        return Err(Error::Config { message: format!("TimeOfDay expected hour, got {token:?}") });
-                    }
-                    None => return Err(Error::Config { message: "TimeOfDay ended before hour".into() }),
-                };
-                let minute = match self.lexer.next_token()? {
-                    Some(Token::Int(minute)) if minute >= 0 => LocalMinute::new(minute as u8),
-                    Some(token) => {
-                        return Err(Error::Config { message: format!("TimeOfDay expected minute, got {token:?}") });
-                    }
-                    None => return Err(Error::Config { message: "TimeOfDay ended before minute".into() }),
-                };
-                self.expect_rparen("TimeOfDay")?;
-                Ok(RampTrigger::TimeOfDay(hour, minute))
-            }
-            Some(Token::Ident(head)) => Err(Error::Config { message: format!("unknown trigger {head}") }),
-            Some(token) => Err(Error::Config { message: format!("trigger expected record head, got {token:?}") }),
-            None => Err(Error::Config { message: "trigger ended before head".into() }),
-        }
-    }
-
-    fn parse_signed_minutes(&mut self) -> Result<SignedMinutes> {
-        match self.lexer.next_token()? {
-            Some(Token::LParen) => {}
-            Some(token) => {
-                return Err(Error::Config {
-                    message: format!("civil trigger expected SignedMinutes record, got {token:?}"),
-                });
-            }
-            None => return Err(Error::Config { message: "civil trigger ended before SignedMinutes".into() }),
-        }
-        match self.lexer.next_token()? {
-            Some(Token::Ident(head)) if head == "SignedMinutes" => {}
-            Some(token) => {
-                return Err(Error::Config { message: format!("expected SignedMinutes, got {token:?}") });
-            }
-            None => return Err(Error::Config { message: "SignedMinutes ended before head".into() }),
-        }
-        let offset = match self.lexer.next_token()? {
-            Some(Token::Int(offset)) => SignedMinutes::new(offset as i16),
-            Some(token) => {
-                return Err(Error::Config { message: format!("SignedMinutes expected integer, got {token:?}") });
-            }
-            None => return Err(Error::Config { message: "SignedMinutes ended before value".into() }),
-        };
-        self.expect_rparen("SignedMinutes")?;
-        Ok(offset)
-    }
-
-    fn parse_theme_mode(&mut self, label: &str) -> Result<ThemeMode> {
-        match self.lexer.next_token()? {
-            Some(Token::Ident(mode)) if mode == "Dark" => Ok(ThemeMode::Dark),
-            Some(Token::Ident(mode)) if mode == "Light" => Ok(ThemeMode::Light),
-            Some(token) => Err(Error::Config { message: format!("{label} expected Dark or Light, got {token:?}") }),
-            None => Err(Error::Config { message: format!("{label} ended before mode") }),
-        }
     }
 }
 
@@ -472,6 +163,367 @@ impl Config {
             || self.warmth.schedule.needs_geolocation()
             || self.brightness.schedule.needs_geolocation()
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ConfigNode {
+    Record { head: String, body: Vec<ConfigNode> },
+    Ident(String),
+    Str(String),
+    Int(i128),
+}
+
+impl ConfigNode {
+    fn atom_name(&self, label: &str) -> Result<&str> {
+        match self {
+            ConfigNode::Ident(value) | ConfigNode::Str(value) => Ok(value),
+            other => Err(Error::Config { message: format!("{label} expected an identifier or string, got {other:?}") }),
+        }
+    }
+
+    fn atom_int(&self, label: &str) -> Result<i128> {
+        match self {
+            ConfigNode::Int(value) => Ok(*value),
+            other => Err(Error::Config { message: format!("{label} expected an integer, got {other:?}") }),
+        }
+    }
+
+    fn head(&self) -> Option<&str> {
+        match self {
+            ConfigNode::Record { head, .. } => Some(head),
+            _ => None,
+        }
+    }
+
+    fn body(&self, label: &str) -> Result<&[ConfigNode]> {
+        match self {
+            ConfigNode::Record { body, .. } => Ok(body),
+            other => Err(Error::Config { message: format!("{label} expected a record, got {other:?}") }),
+        }
+    }
+}
+
+struct ConfigDocument {
+    roots: Vec<ConfigNode>,
+}
+
+impl ConfigDocument {
+    fn parse(text: &str) -> Result<Self> {
+        let mut lexer = Lexer::new(text);
+        let mut roots = Vec::new();
+        while let Some(token) = lexer.next_token()? {
+            roots.push(Self::parse_node(token, &mut lexer)?);
+        }
+        Ok(Self { roots })
+    }
+
+    fn config(&self) -> Result<Config> {
+        let root = required_record(&self.roots, "Config")?;
+        Ok(Config {
+            theme: parse_theme_axis(required_node(root, "Theme")?.body("Theme")?)?,
+            warmth: parse_warmth_axis(required_node(root, "Warmth")?.body("Warmth")?)?,
+            brightness: parse_brightness_axis(required_node(root, "Brightness")?.body("Brightness")?)?,
+        })
+    }
+
+    fn parse_node(token: Token, lexer: &mut Lexer<'_>) -> Result<ConfigNode> {
+        match token {
+            Token::LParen => Self::parse_record(lexer),
+            Token::Ident(value) => Ok(ConfigNode::Ident(value)),
+            Token::Str(value) => Ok(ConfigNode::Str(value)),
+            Token::Int(value) => Ok(ConfigNode::Int(value)),
+            Token::UInt(value) => Ok(ConfigNode::Int(value as i128)),
+            Token::RParen => Err(Error::Config { message: "unexpected closing paren".into() }),
+            other => Err(Error::Config { message: format!("unsupported token in Chroma config: {other:?}") }),
+        }
+    }
+
+    fn parse_record(lexer: &mut Lexer<'_>) -> Result<ConfigNode> {
+        let head = match lexer.next_token()? {
+            Some(Token::Ident(head)) => head,
+            Some(Token::Str(head)) => head,
+            Some(token) => {
+                return Err(Error::Config { message: format!("record head expected identifier, got {token:?}") });
+            }
+            None => return Err(Error::Config { message: "record ended before head".into() }),
+        };
+        let mut body = Vec::new();
+        loop {
+            match lexer.next_token()? {
+                Some(Token::RParen) => return Ok(ConfigNode::Record { head, body }),
+                Some(token) => body.push(Self::parse_node(token, lexer)?),
+                None => return Err(Error::Config { message: format!("{head} ended before closing paren") }),
+            }
+        }
+    }
+}
+
+fn parse_theme_axis(nodes: &[ConfigNode]) -> Result<ThemeAxis> {
+    Ok(ThemeAxis {
+        concerns: parse_theme_concerns(required_record(nodes, "Concerns")?)?,
+        palettes: parse_theme_palettes(required_record(nodes, "Palettes")?)?,
+        adapters: parse_theme_adapters(optional_record(nodes, "Adapters")?)?,
+        font_point_size: parse_font_point_size(optional_record(nodes, "FontPointSize")?)?,
+        schedule: parse_theme_schedule_ast(required_record(nodes, "Schedule")?)?,
+    })
+}
+
+fn parse_warmth_axis(nodes: &[ConfigNode]) -> Result<WarmthAxis> {
+    Ok(WarmthAxis { schedule: parse_warmth_schedule(required_record(nodes, "Schedule")?)? })
+}
+
+fn parse_brightness_axis(nodes: &[ConfigNode]) -> Result<BrightnessAxis> {
+    Ok(BrightnessAxis { schedule: parse_brightness_schedule(required_record(nodes, "Schedule")?)? })
+}
+
+fn parse_theme_concerns(nodes: &[ConfigNode]) -> Result<Vec<ThemeConcern>> {
+    if nodes.is_empty() {
+        return Err(Error::Config { message: "Concerns must name at least one concern".into() });
+    }
+    nodes.iter().map(|node| ThemeConcern::from_config_name(node.atom_name("Concerns")?)).collect()
+}
+
+fn parse_theme_palettes(nodes: &[ConfigNode]) -> Result<ThemePalettes> {
+    Ok(ThemePalettes {
+        dark: parse_theme_palette(required_record(nodes, "Dark")?, "Dark")?,
+        light: parse_theme_palette(required_record(nodes, "Light")?, "Light")?,
+    })
+}
+
+fn parse_theme_palette(nodes: &[ConfigNode], name: &str) -> Result<ThemePalette> {
+    let mut slots: [Option<String>; 16] = std::array::from_fn(|_| None);
+    for node in nodes {
+        let ConfigNode::Record { head, body } = node else {
+            return Err(Error::Config { message: format!("{name} palette expected BaseXX records, got {node:?}") });
+        };
+        let index = base16_slot_index(head)?;
+        let color = required_atom(body, head)?.to_string();
+        slots[index] = Some(color);
+    }
+    palette_from_slots(name, slots)
+}
+
+fn parse_theme_adapters(nodes: Option<&[ConfigNode]>) -> Result<ThemeAdapters> {
+    let Some(nodes) = nodes else {
+        return Ok(ThemeAdapters::default());
+    };
+    let mut adapters = ThemeAdapters::default();
+    for node in nodes {
+        let ConfigNode::Record { head, body } = node else {
+            return Err(Error::Config { message: format!("Adapters expected records, got {node:?}") });
+        };
+        let path = PathBuf::from(required_atom(body, head)?);
+        match head.as_str() {
+            "Dconf" => adapters.dconf = Some(path),
+            "Emacsclient" => adapters.emacsclient = Some(path),
+            _ => return Err(Error::Config { message: format!("unknown adapter {head}") }),
+        }
+    }
+    Ok(adapters)
+}
+
+fn parse_font_point_size(nodes: Option<&[ConfigNode]>) -> Result<u8> {
+    let Some(nodes) = nodes else {
+        return Ok(12);
+    };
+    let value = required_int(nodes, "FontPointSize")?;
+    if value > 0 && value <= u8::MAX as i128 {
+        Ok(value as u8)
+    } else {
+        Err(Error::Config { message: format!("FontPointSize expected a positive u8, got {value}") })
+    }
+}
+
+fn parse_theme_schedule_ast(nodes: &[ConfigNode]) -> Result<ThemeSchedule> {
+    if let Some(manual) = optional_record(nodes, "Manual")? {
+        return Ok(ThemeSchedule::Manual(parse_theme_mode_atom(required_atom(manual, "Manual")?, "Manual")?));
+    }
+    let mut waypoints = Vec::new();
+    let mut default = ThemeMode::Dark;
+    for node in nodes {
+        let ConfigNode::Record { head, body } = node else {
+            return Err(Error::Config { message: format!("Schedule expected records, got {node:?}") });
+        };
+        match head.as_str() {
+            "Waypoint" => {
+                let trigger = parse_trigger(
+                    body.first().ok_or_else(|| Error::Config { message: "Waypoint ended before trigger".into() })?,
+                )?;
+                let mode = parse_theme_mode_atom(
+                    body.get(1)
+                        .ok_or_else(|| Error::Config { message: "Waypoint ended before mode".into() })?
+                        .atom_name("Waypoint")?,
+                    "Waypoint",
+                )?;
+                waypoints.push(ThemeWaypoint { trigger, mode });
+            }
+            "Default" => default = parse_theme_mode_atom(required_atom(body, "Default")?, "Default")?,
+            "Manual" => {}
+            other => return Err(Error::Config { message: format!("unknown Schedule record {other}") }),
+        }
+    }
+    if waypoints.is_empty() {
+        Err(Error::Config { message: "Schedule must contain Manual or Waypoint records".into() })
+    } else {
+        Ok(ThemeSchedule::Scheduled { waypoints, default })
+    }
+}
+
+fn parse_warmth_schedule(nodes: &[ConfigNode]) -> Result<WarmthSchedule> {
+    if let Some(manual) = optional_record(nodes, "Manual")? {
+        return Ok(WarmthSchedule::Manual(parse_warmth_level(required_atom(manual, "Manual")?)?));
+    }
+    let mut waypoints = Vec::new();
+    let mut default = WarmthLevel::Neutral;
+    for node in nodes {
+        let ConfigNode::Record { head, body } = node else {
+            return Err(Error::Config { message: format!("Warmth Schedule expected records, got {node:?}") });
+        };
+        match head.as_str() {
+            "Waypoint" => waypoints.push(WarmthWaypoint {
+                trigger: parse_trigger(required_positional(body, 0, "warmth waypoint trigger")?)?,
+                target: parse_warmth_level(required_atom(required_record(body, "Level")?, "Level")?)?,
+                ramp_duration: parse_ramp_duration(required_record(body, "Ramp")?)?,
+            }),
+            "Default" => default = parse_warmth_level(required_atom(body, "Default")?)?,
+            "Manual" => {}
+            other => return Err(Error::Config { message: format!("unknown Warmth Schedule record {other}") }),
+        }
+    }
+    if waypoints.is_empty() {
+        Err(Error::Config { message: "Warmth Schedule must contain Manual or Waypoint records".into() })
+    } else {
+        Ok(WarmthSchedule::Scheduled { waypoints, default })
+    }
+}
+
+fn parse_brightness_schedule(nodes: &[ConfigNode]) -> Result<BrightnessSchedule> {
+    if let Some(manual) = optional_record(nodes, "Manual")? {
+        return Ok(BrightnessSchedule::Manual(parse_brightness_level(required_atom(manual, "Manual")?)?));
+    }
+    let mut waypoints = Vec::new();
+    let mut default = BrightnessLevel::Bright;
+    for node in nodes {
+        let ConfigNode::Record { head, body } = node else {
+            return Err(Error::Config { message: format!("Brightness Schedule expected records, got {node:?}") });
+        };
+        match head.as_str() {
+            "Waypoint" => waypoints.push(BrightnessWaypoint {
+                trigger: parse_trigger(required_positional(body, 0, "brightness waypoint trigger")?)?,
+                target: parse_brightness_level(required_atom(required_record(body, "Level")?, "Level")?)?,
+                ramp_duration: parse_ramp_duration(required_record(body, "Ramp")?)?,
+            }),
+            "Default" => default = parse_brightness_level(required_atom(body, "Default")?)?,
+            "Manual" => {}
+            other => return Err(Error::Config { message: format!("unknown Brightness Schedule record {other}") }),
+        }
+    }
+    if waypoints.is_empty() {
+        Err(Error::Config { message: "Brightness Schedule must contain Manual or Waypoint records".into() })
+    } else {
+        Ok(BrightnessSchedule::Scheduled { waypoints, default })
+    }
+}
+
+fn parse_trigger(node: &ConfigNode) -> Result<RampTrigger> {
+    let ConfigNode::Record { head, body } = node else {
+        return Err(Error::Config { message: format!("trigger expected record, got {node:?}") });
+    };
+    match head.as_str() {
+        "CivilDawn" => Ok(RampTrigger::CivilDawn(parse_signed_minutes(required_record(body, "SignedMinutes")?)?)),
+        "CivilDusk" => Ok(RampTrigger::CivilDusk(parse_signed_minutes(required_record(body, "SignedMinutes")?)?)),
+        "TimeOfDay" => {
+            let hour = required_positional(body, 0, "TimeOfDay hour")?.atom_int("TimeOfDay hour")?;
+            let minute = required_positional(body, 1, "TimeOfDay minute")?.atom_int("TimeOfDay minute")?;
+            if hour < 0 || minute < 0 {
+                return Err(Error::Config { message: "TimeOfDay values must be non-negative".into() });
+            }
+            Ok(RampTrigger::TimeOfDay(LocalHour::new(hour as u8), LocalMinute::new(minute as u8)))
+        }
+        other => Err(Error::Config { message: format!("unknown trigger {other}") }),
+    }
+}
+
+fn parse_signed_minutes(nodes: &[ConfigNode]) -> Result<SignedMinutes> {
+    let value = required_int(nodes, "SignedMinutes")?;
+    Ok(SignedMinutes::new(value as i16))
+}
+
+fn parse_ramp_duration(nodes: &[ConfigNode]) -> Result<RampDuration> {
+    if let Some(minutes) = optional_record(nodes, "Minutes")? {
+        let value = required_int(minutes, "Minutes")?;
+        if value < 0 {
+            return Err(Error::Config { message: "Ramp Minutes must be non-negative".into() });
+        }
+        return Ok(RampDuration::from_minutes(value as u32));
+    }
+    if let Some(seconds) = optional_record(nodes, "Seconds")? {
+        let value = required_int(seconds, "Seconds")?;
+        if value < 0 {
+            return Err(Error::Config { message: "Ramp Seconds must be non-negative".into() });
+        }
+        return Ok(RampDuration::from_seconds(value as u64));
+    }
+    Err(Error::Config { message: "Ramp expected Minutes or Seconds".into() })
+}
+
+fn parse_theme_mode_atom(value: &str, label: &str) -> Result<ThemeMode> {
+    match value {
+        "Dark" => Ok(ThemeMode::Dark),
+        "Light" => Ok(ThemeMode::Light),
+        _ => Err(Error::Config { message: format!("{label} expected Dark or Light, got {value:?}") }),
+    }
+}
+
+fn parse_warmth_level(value: &str) -> Result<WarmthLevel> {
+    match value {
+        "Cold" => Ok(WarmthLevel::Cold),
+        "Cool" => Ok(WarmthLevel::Cool),
+        "Neutral" => Ok(WarmthLevel::Neutral),
+        "Warm" => Ok(WarmthLevel::Warm),
+        "Warmer" => Ok(WarmthLevel::Warmer),
+        "Warmest" => Ok(WarmthLevel::Warmest),
+        _ => Err(Error::Config { message: format!("unknown warmth level {value:?}") }),
+    }
+}
+
+fn parse_brightness_level(value: &str) -> Result<BrightnessLevel> {
+    match value {
+        "Dim" => Ok(BrightnessLevel::Dim),
+        "Dimmer" => Ok(BrightnessLevel::Dimmer),
+        "Mid" => Ok(BrightnessLevel::Mid),
+        "Bright" => Ok(BrightnessLevel::Bright),
+        "Brighter" => Ok(BrightnessLevel::Brighter),
+        "Brightest" => Ok(BrightnessLevel::Brightest),
+        _ => Err(Error::Config { message: format!("unknown brightness level {value:?}") }),
+    }
+}
+
+fn required_node<'a>(nodes: &'a [ConfigNode], head: &str) -> Result<&'a ConfigNode> {
+    nodes
+        .iter()
+        .find(|node| node.head() == Some(head))
+        .ok_or_else(|| Error::Config { message: format!("Config must contain a {head} record") })
+}
+
+fn required_record<'a>(nodes: &'a [ConfigNode], head: &str) -> Result<&'a [ConfigNode]> {
+    required_node(nodes, head)?.body(head)
+}
+
+fn optional_record<'a>(nodes: &'a [ConfigNode], head: &str) -> Result<Option<&'a [ConfigNode]>> {
+    nodes.iter().find(|node| node.head() == Some(head)).map(|node| node.body(head)).transpose()
+}
+
+fn required_positional<'a>(nodes: &'a [ConfigNode], index: usize, label: &str) -> Result<&'a ConfigNode> {
+    nodes.get(index).ok_or_else(|| Error::Config { message: format!("{label} is missing") })
+}
+
+fn required_atom<'a>(nodes: &'a [ConfigNode], label: &str) -> Result<&'a str> {
+    required_positional(nodes, 0, label)?.atom_name(label)
+}
+
+fn required_int(nodes: &[ConfigNode], label: &str) -> Result<i128> {
+    required_positional(nodes, 0, label)?.atom_int(label)
 }
 
 impl fmt::Display for ConfigFile {

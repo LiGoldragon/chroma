@@ -14,6 +14,7 @@ use core::fmt;
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaEnum};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
+use crate::error::{Error, Result};
 use crate::time::{RampDuration, RampTrigger};
 
 /// A discrete brightness level on the daemon's standard ladder.
@@ -124,6 +125,18 @@ impl BrightnessPercent {
         let to = target.0 as f64;
         let interpolated = from + (to - from) * fraction;
         Self::new(interpolated.round() as u8)
+    }
+
+    /// Archive into bytes for redb persistence.
+    pub fn archive(&self) -> Result<Vec<u8>> {
+        rkyv::to_bytes::<rkyv::rancor::Error>(self)
+            .map(|bytes| bytes.to_vec())
+            .map_err(|err| Error::RkyvCodec(err.to_string()))
+    }
+
+    /// Decode a redb-stored rkyv archive.
+    pub fn from_archive(bytes: &[u8]) -> Result<Self> {
+        rkyv::from_bytes::<Self, rkyv::rancor::Error>(bytes).map_err(|err| Error::RkyvCodec(err.to_string()))
     }
 }
 

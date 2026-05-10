@@ -7,13 +7,14 @@
 use core::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Arc;
 
+use kameo::actor::{Actor, ActorRef, Spawn};
+use kameo::error::Infallible;
+use kameo::message::{Context, Message};
 use nota_codec::NotaEnum;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-use tokio::task::AbortHandle;
 use tokio::time::{Duration, timeout};
+use zbus::zvariant::OwnedObjectPath;
 
 use crate::error::{Error, Result};
 use crate::time::RampTrigger;
@@ -40,6 +41,18 @@ impl ThemeMode {
             ThemeMode::Dark => ThemeMode::Light,
             ThemeMode::Light => ThemeMode::Dark,
         }
+    }
+
+    /// Archive into bytes for redb persistence.
+    pub fn archive(&self) -> Result<Vec<u8>> {
+        rkyv::to_bytes::<rkyv::rancor::Error>(self)
+            .map(|bytes| bytes.to_vec())
+            .map_err(|err| Error::RkyvCodec(err.to_string()))
+    }
+
+    /// Decode a redb-stored rkyv archive.
+    pub fn from_archive(bytes: &[u8]) -> Result<Self> {
+        rkyv::from_bytes::<Self, rkyv::rancor::Error>(bytes).map_err(|err| Error::RkyvCodec(err.to_string()))
     }
 }
 
@@ -82,16 +95,6 @@ impl ThemeConcern {
             Self::Desktop => "desktop",
             Self::Ghostty => "ghostty",
             Self::Emacs => "emacs",
-        }
-    }
-
-    async fn apply(self, mode: ThemeMode, context: Arc<ThemeApplyContext>) -> Result<()> {
-        let palette = context.palettes.for_mode(mode);
-        match self {
-            Self::Terminal => TerminalThemeConcern::new(mode, palette.clone()).apply().await,
-            Self::Desktop => DesktopThemeConcern::new(mode, &context.adapters).apply().await,
-            Self::Ghostty => GhosttyThemeConcern::new(palette.clone(), context.font_point_size).apply().await,
-            Self::Emacs => EmacsThemeConcern::new(mode, &context.adapters).apply().await,
         }
     }
 }
@@ -164,6 +167,34 @@ impl ThemePalette {
             self.base0d,
         )
     }
+
+    /// Ghostty's ANSI palette entries, using base16's conventional
+    /// terminal-color mapping.
+    pub fn ghostty_palette_lines(&self) -> String {
+        let colors = [
+            &self.base00,
+            &self.base08,
+            &self.base0b,
+            &self.base0a,
+            &self.base0d,
+            &self.base0e,
+            &self.base0c,
+            &self.base05,
+            &self.base03,
+            &self.base08,
+            &self.base0b,
+            &self.base0a,
+            &self.base0d,
+            &self.base0e,
+            &self.base0c,
+            &self.base07,
+        ];
+        let mut lines = String::new();
+        for (index, color) in colors.into_iter().enumerate() {
+            lines.push_str(&format!("palette = {index}={color}\n"));
+        }
+        lines
+    }
 }
 
 /// Dark and light palettes read from NOTA config.
@@ -235,142 +266,172 @@ pub struct ThemeAxis {
     pub schedule: ThemeSchedule,
 }
 
-#[derive(Clone)]
-struct ThemeApplyContext {
-    palettes: ThemePalettes,
-    adapters: ThemeAdapters,
-    font_point_size: u8,
-}
-
 /// Applies theme changes through independent native concern actors.
-#[derive(Clone)]
 pub struct ThemeApplier {
-    actors: Vec<ThemeActor>,
+    concerns: Vec<ThemeConcernReference>,
 }
 
 impl ThemeApplier {
-    pub fn from_axis(axis: ThemeAxis) -> Self {
-        let context = Arc::new(ThemeApplyContext {
-            palettes: axis.palettes,
-            adapters: axis.adapters,
-            font_point_size: axis.font_point_size,
-        });
-        Self {
-            actors: axis.concerns.into_iter().map(|concern| ThemeActor::spawn(concern, Arc::clone(&context))).collect(),
-        }
+    pub async fn start(axis: ThemeAxis) -> ActorRef<Self> {
+        let reference = Self::spawn(axis);
+        reference.wait_for_startup().await;
+        reference
     }
 
-    pub fn apply(&self, mode: ThemeMode) -> Result<()> {
-        for actor in &self.actors {
-            actor.apply(mode)?;
+    fn from_axis(axis: ThemeAxis) -> Self {
+        let mut concerns = Vec::new();
+        for concern in axis.concerns {
+            let reference = match concern {
+                ThemeConcern::Terminal => {
+                    ThemeConcernReference::Terminal(TerminalThemeConcern::spawn(TerminalThemeConcern {
+                        palettes: axis.palettes.clone(),
+                    }))
+                }
+                ThemeConcern::Desktop => {
+                    ThemeConcernReference::Desktop(DesktopThemeConcern::spawn(DesktopThemeConcern {
+                        adapters: axis.adapters.clone(),
+                    }))
+                }
+                ThemeConcern::Ghostty => {
+                    ThemeConcernReference::Ghostty(GhosttyThemeConcern::spawn(GhosttyThemeConcern {
+                        palettes: axis.palettes.clone(),
+                        font_point_size: axis.font_point_size,
+                        reloader: GhosttyReloader::systemd_user_unit("app-com.mitchellh.ghostty.service"),
+                    }))
+                }
+                ThemeConcern::Emacs => ThemeConcernReference::Emacs(EmacsThemeConcern::spawn(EmacsThemeConcern {
+                    adapters: axis.adapters.clone(),
+                })),
+            };
+            concerns.push(reference);
+        }
+        Self { concerns }
+    }
+}
+
+#[derive(Clone)]
+enum ThemeConcernReference {
+    Terminal(ActorRef<TerminalThemeConcern>),
+    Desktop(ActorRef<DesktopThemeConcern>),
+    Ghostty(ActorRef<GhosttyThemeConcern>),
+    Emacs(ActorRef<EmacsThemeConcern>),
+}
+
+impl ThemeConcernReference {
+    async fn apply(&self, mode: ThemeMode) -> Result<()> {
+        match self {
+            Self::Terminal(reference) => reference.tell(ApplyThemeConcern { mode }).await,
+            Self::Desktop(reference) => reference.tell(ApplyThemeConcern { mode }).await,
+            Self::Ghostty(reference) => reference.tell(ApplyThemeConcern { mode }).await,
+            Self::Emacs(reference) => reference.tell(ApplyThemeConcern { mode }).await,
+        }
+        .map_err(|error| Error::ActorCall { message: error.to_string() })
+    }
+}
+
+impl Actor for ThemeApplier {
+    type Args = ThemeAxis;
+    type Error = Infallible;
+
+    async fn on_start(axis: Self::Args, _reference: ActorRef<Self>) -> std::result::Result<Self, Self::Error> {
+        Ok(Self::from_axis(axis))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ApplyTheme {
+    pub mode: ThemeMode,
+}
+
+impl Message<ApplyTheme> for ThemeApplier {
+    type Reply = Result<()>;
+
+    async fn handle(&mut self, message: ApplyTheme, _context: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        for concern in &self.concerns {
+            concern.apply(message.mode).await?;
         }
         Ok(())
     }
 }
 
-#[derive(Clone)]
-struct ThemeActor {
-    concern: ThemeConcern,
-    sender: UnboundedSender<ThemeMode>,
-}
-
-impl ThemeActor {
-    fn spawn(concern: ThemeConcern, context: Arc<ThemeApplyContext>) -> Self {
-        let (sender, receiver) = unbounded_channel();
-        tokio::spawn(ThemeConcernActor::new(concern, context, receiver).run());
-        Self { concern, sender }
-    }
-
-    fn apply(&self, mode: ThemeMode) -> Result<()> {
-        self.sender.send(mode).map_err(|_| Error::Daemon { message: format!("{} theme actor is closed", self.concern) })
-    }
-}
-
-struct ThemeConcernActor {
-    concern: ThemeConcern,
-    context: Arc<ThemeApplyContext>,
-    receiver: UnboundedReceiver<ThemeMode>,
-    active: Option<AbortHandle>,
-}
-
-impl ThemeConcernActor {
-    fn new(concern: ThemeConcern, context: Arc<ThemeApplyContext>, receiver: UnboundedReceiver<ThemeMode>) -> Self {
-        Self { concern, context, receiver, active: None }
-    }
-
-    async fn run(mut self) {
-        while let Some(mut mode) = self.receiver.recv().await {
-            while let Ok(next) = self.receiver.try_recv() {
-                mode = next;
-            }
-            self.start(mode);
-        }
-
-        if let Some(handle) = self.active.take() {
-            handle.abort();
-        }
-    }
-
-    fn start(&mut self, mode: ThemeMode) {
-        if let Some(handle) = self.active.take() {
-            handle.abort();
-        }
-
-        let concern = self.concern;
-        let context = Arc::clone(&self.context);
-        let handle = tokio::spawn(async move {
-            if let Err(error) = concern.apply(mode, context).await {
-                eprintln!("chroma-daemon {concern} theme concern error: {error}");
-            }
-        });
-        self.active = Some(handle.abort_handle());
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ApplyThemeConcern {
+    mode: ThemeMode,
 }
 
 struct TerminalThemeConcern {
-    mode: ThemeMode,
-    palette: ThemePalette,
+    palettes: ThemePalettes,
+}
+
+impl Actor for TerminalThemeConcern {
+    type Args = Self;
+    type Error = Infallible;
+
+    async fn on_start(concern: Self::Args, _reference: ActorRef<Self>) -> std::result::Result<Self, Self::Error> {
+        Ok(concern)
+    }
+}
+
+impl Message<ApplyThemeConcern> for TerminalThemeConcern {
+    type Reply = ();
+
+    async fn handle(&mut self, message: ApplyThemeConcern, _context: &mut Context<Self, Self::Reply>) {
+        let palette = self.palettes.for_mode(message.mode).clone();
+        if let Err(error) = self.apply(message.mode, palette).await {
+            eprintln!("chroma-daemon terminal theme concern error: {error}");
+        }
+    }
 }
 
 impl TerminalThemeConcern {
-    fn new(mode: ThemeMode, palette: ThemePalette) -> Self {
-        Self { mode, palette }
-    }
-
-    async fn apply(self) -> Result<()> {
+    async fn apply(&self, mode: ThemeMode, palette: ThemePalette) -> Result<()> {
         let state_dir = state_home()?.join("chroma");
         tokio::fs::create_dir_all(&state_dir).await?;
-        tokio::fs::write(state_dir.join("current-mode"), format!("{}\n", self.mode)).await?;
+        tokio::fs::write(state_dir.join("current-mode"), format!("{mode}\n")).await?;
         tokio::fs::write(
             state_dir.join("fzf-theme.sh"),
-            format!("export FZF_DEFAULT_OPTS=\"$FZF_DEFAULT_OPTS {}\"\n", self.palette.fzf_options()),
+            format!("export FZF_DEFAULT_OPTS=\"$FZF_DEFAULT_OPTS {}\"\n", palette.fzf_options()),
         )
         .await?;
         Ok(())
     }
 }
 
-struct DesktopThemeConcern<'a> {
-    mode: ThemeMode,
-    adapters: &'a ThemeAdapters,
+struct DesktopThemeConcern {
+    adapters: ThemeAdapters,
 }
 
-impl<'a> DesktopThemeConcern<'a> {
-    fn new(mode: ThemeMode, adapters: &'a ThemeAdapters) -> Self {
-        Self { mode, adapters }
-    }
+impl Actor for DesktopThemeConcern {
+    type Args = Self;
+    type Error = Infallible;
 
-    async fn apply(self) -> Result<()> {
-        if let Some(dconf) = &self.adapters.dconf {
-            self.write_dconf(dconf).await?;
+    async fn on_start(concern: Self::Args, _reference: ActorRef<Self>) -> std::result::Result<Self, Self::Error> {
+        Ok(concern)
+    }
+}
+
+impl Message<ApplyThemeConcern> for DesktopThemeConcern {
+    type Reply = ();
+
+    async fn handle(&mut self, message: ApplyThemeConcern, _context: &mut Context<Self, Self::Reply>) {
+        if let Err(error) = self.apply(message.mode).await {
+            eprintln!("chroma-daemon desktop theme concern error: {error}");
         }
-        self.write_gtk_settings().await
+    }
+}
+
+impl DesktopThemeConcern {
+    async fn apply(&self, mode: ThemeMode) -> Result<()> {
+        if let Some(dconf) = &self.adapters.dconf {
+            self.write_dconf(mode, dconf).await?;
+        }
+        self.write_gtk_settings(mode).await
     }
 
-    async fn write_dconf(&self, dconf: &Path) -> Result<()> {
-        let color_scheme = if self.mode == ThemeMode::Dark { "'prefer-dark'" } else { "'prefer-light'" };
-        let gtk_theme = if self.mode == ThemeMode::Dark { "'adw-gtk3-dark'" } else { "'adw-gtk3'" };
-        let icon_theme = if self.mode == ThemeMode::Dark { "'Papirus-Dark'" } else { "'Papirus-Light'" };
+    async fn write_dconf(&self, mode: ThemeMode, dconf: &Path) -> Result<()> {
+        let color_scheme = if mode == ThemeMode::Dark { "'prefer-dark'" } else { "'prefer-light'" };
+        let gtk_theme = if mode == ThemeMode::Dark { "'adw-gtk3-dark'" } else { "'adw-gtk3'" };
+        let icon_theme = if mode == ThemeMode::Dark { "'Papirus-Dark'" } else { "'Papirus-Light'" };
         self.run_dconf_write(dconf, "/org/gnome/desktop/interface/color-scheme", color_scheme).await?;
         self.run_dconf_write(dconf, "/org/gnome/desktop/interface/gtk-theme", gtk_theme).await?;
         self.run_dconf_write(dconf, "/org/gnome/desktop/interface/icon-theme", icon_theme).await
@@ -395,11 +456,11 @@ impl<'a> DesktopThemeConcern<'a> {
         }
     }
 
-    async fn write_gtk_settings(&self) -> Result<()> {
+    async fn write_gtk_settings(&self, mode: ThemeMode) -> Result<()> {
         let config_home = config_home()?;
-        let gtk_theme = if self.mode == ThemeMode::Dark { "adw-gtk3-dark" } else { "adw-gtk3" };
-        let icon_theme = if self.mode == ThemeMode::Dark { "Papirus-Dark" } else { "Papirus-Light" };
-        let prefer_dark = if self.mode == ThemeMode::Dark { "true" } else { "false" };
+        let gtk_theme = if mode == ThemeMode::Dark { "adw-gtk3-dark" } else { "adw-gtk3" };
+        let icon_theme = if mode == ThemeMode::Dark { "Papirus-Dark" } else { "Papirus-Light" };
+        let prefer_dark = if mode == ThemeMode::Dark { "true" } else { "false" };
         let text = format!(
             "[Settings]\n\
              gtk-theme-name={gtk_theme}\n\
@@ -419,16 +480,33 @@ impl<'a> DesktopThemeConcern<'a> {
 }
 
 struct GhosttyThemeConcern {
-    palette: ThemePalette,
+    palettes: ThemePalettes,
     font_point_size: u8,
+    reloader: GhosttyReloader,
+}
+
+impl Actor for GhosttyThemeConcern {
+    type Args = Self;
+    type Error = Infallible;
+
+    async fn on_start(concern: Self::Args, _reference: ActorRef<Self>) -> std::result::Result<Self, Self::Error> {
+        Ok(concern)
+    }
+}
+
+impl Message<ApplyThemeConcern> for GhosttyThemeConcern {
+    type Reply = ();
+
+    async fn handle(&mut self, message: ApplyThemeConcern, _context: &mut Context<Self, Self::Reply>) {
+        let palette = self.palettes.for_mode(message.mode).clone();
+        if let Err(error) = self.apply(palette).await {
+            eprintln!("chroma-daemon ghostty theme concern error: {error}");
+        }
+    }
 }
 
 impl GhosttyThemeConcern {
-    fn new(palette: ThemePalette, font_point_size: u8) -> Self {
-        Self { palette, font_point_size }
-    }
-
-    async fn apply(self) -> Result<()> {
+    async fn apply(&self, palette: ThemePalette) -> Result<()> {
         let directory = config_home()?.join("ghostty");
         tokio::fs::create_dir_all(&directory).await?;
         let config = format!(
@@ -438,29 +516,84 @@ impl GhosttyThemeConcern {
              gtk-titlebar = false\n\
              window-theme = ghostty\n\
              background = {}\n\
-             foreground = {}\n",
-            self.font_point_size, self.palette.base00, self.palette.base05
+             foreground = {}\n\
+             cursor-color = {}\n\
+             selection-background = {}\n\
+             selection-foreground = {}\n\
+             {}",
+            self.font_point_size,
+            palette.base00,
+            palette.base05,
+            palette.base05,
+            palette.base02,
+            palette.base05,
+            palette.ghostty_palette_lines(),
         );
-        tokio::fs::write(directory.join("config"), config).await?;
+        tokio::fs::write(directory.join("config.ghostty"), config).await?;
+        self.reloader.reload().await?;
         Ok(())
     }
 }
 
-struct EmacsThemeConcern<'a> {
-    mode: ThemeMode,
-    adapters: &'a ThemeAdapters,
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GhosttyReloader {
+    systemd_unit: String,
 }
 
-impl<'a> EmacsThemeConcern<'a> {
-    fn new(mode: ThemeMode, adapters: &'a ThemeAdapters) -> Self {
-        Self { mode, adapters }
+impl GhosttyReloader {
+    fn systemd_user_unit(unit: impl Into<String>) -> Self {
+        Self { systemd_unit: unit.into() }
     }
 
-    async fn apply(self) -> Result<()> {
+    async fn reload(&self) -> Result<()> {
+        let reload = async {
+            let connection = zbus::Connection::session().await?;
+            let proxy = zbus::Proxy::new(
+                &connection,
+                "org.freedesktop.systemd1",
+                "/org/freedesktop/systemd1",
+                "org.freedesktop.systemd1.Manager",
+            )
+            .await?;
+            let _: OwnedObjectPath = proxy.call("ReloadUnit", &(self.systemd_unit.as_str(), "replace")).await?;
+            Ok(())
+        };
+        match timeout(Duration::from_secs(1), reload).await {
+            Ok(result) => result,
+            Err(_) => Err(Error::Daemon { message: "ghostty systemd reload timed out".into() }),
+        }
+    }
+}
+
+struct EmacsThemeConcern {
+    adapters: ThemeAdapters,
+}
+
+impl Actor for EmacsThemeConcern {
+    type Args = Self;
+    type Error = Infallible;
+
+    async fn on_start(concern: Self::Args, _reference: ActorRef<Self>) -> std::result::Result<Self, Self::Error> {
+        Ok(concern)
+    }
+}
+
+impl Message<ApplyThemeConcern> for EmacsThemeConcern {
+    type Reply = ();
+
+    async fn handle(&mut self, message: ApplyThemeConcern, _context: &mut Context<Self, Self::Reply>) {
+        if let Err(error) = self.apply(message.mode).await {
+            eprintln!("chroma-daemon emacs theme concern error: {error}");
+        }
+    }
+}
+
+impl EmacsThemeConcern {
+    async fn apply(&self, mode: ThemeMode) -> Result<()> {
         let Some(emacsclient) = &self.adapters.emacsclient else {
             return Ok(());
         };
-        let theme = if self.mode == ThemeMode::Dark { "ignis-dark" } else { "ignis-light" };
+        let theme = if mode == ThemeMode::Dark { "ignis-dark" } else { "ignis-light" };
         let expression = format!(
             "(progn (add-to-list 'custom-theme-load-path \"$HOME/.config/emacs-ignis-themes\") \
              (mapc #'disable-theme custom-enabled-themes) (load-theme '{theme} t))"

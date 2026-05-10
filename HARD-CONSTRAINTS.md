@@ -42,3 +42,23 @@ Tests:
 - `hc_chroma_005_terminal_concern_does_not_broadcast_to_pty_inventory`
 - `hc_chroma_006_daemon_does_not_trigger_global_terminal_reload_files`
 - `hc_chroma_007_cli_does_not_emit_live_terminal_palette_sequences`
+
+## HC-CHROMA-005 — Kameo Actor Runtime, No Hand-Rolled Task Actors
+
+Runtime concerns are Kameo actors. Chroma must not rebuild an
+actor runtime out of raw `tokio::spawn`, unbounded mpsc channels,
+`AbortHandle` cancellation slots, or shared mutex state.
+
+Tests:
+
+- `hc_chroma_008_runtime_uses_kameo_not_hand_rolled_task_actors`
+- `hc_chroma_009_runtime_has_no_shared_mutex_between_actors`
+
+## HC-CHROMA-006 — Ghostty Native Concern, No Shell Reload Path
+
+Ghostty application writes the current Ghostty config format and
+reloads the Ghostty user service through systemd's DBus API.
+There is no shell script, `systemctl` command, or retained
+WezTerm reload path in Chroma.
+
+Test: `hc_chroma_010_ghostty_concern_uses_native_config_and_systemd_dbus_reload`.

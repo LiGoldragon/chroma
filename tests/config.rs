@@ -1,4 +1,6 @@
-use chroma::{ConfigFile, RampTrigger, ThemeConcern, ThemeMode, ThemeSchedule};
+use chroma::{
+    BrightnessSchedule, ConfigFile, RampTrigger, ThemeConcern, ThemeMode, ThemeSchedule, WarmthLevel, WarmthSchedule,
+};
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -57,6 +59,45 @@ fn config_file_decodes_manual_theme_schedule_from_nota_config() {
     let theme = ConfigFile::from_path(config).theme_axis().expect("theme axis decodes");
 
     assert_eq!(theme.schedule, ThemeSchedule::Manual(ThemeMode::Light));
+}
+
+#[test]
+fn config_file_extracts_full_visual_config_from_nota_config() {
+    let fixture = Fixture::new();
+    let config = fixture.write_config(NATIVE_CONFIG);
+
+    let config = ConfigFile::from_path(config).config().expect("full config decodes");
+
+    assert_eq!(config.theme.concerns, vec![ThemeConcern::Terminal, ThemeConcern::Desktop, ThemeConcern::Ghostty]);
+    assert_eq!(config.warmth.schedule, WarmthSchedule::Manual(WarmthLevel::Neutral));
+    assert_eq!(config.brightness.schedule, BrightnessSchedule::Manual(chroma::BrightnessLevel::Bright));
+}
+
+#[test]
+fn config_file_decodes_scheduled_warmth_from_nota_config() {
+    let fixture = Fixture::new();
+    let config = fixture.write_config(&NATIVE_CONFIG.replace(
+        "(Warmth (Schedule (Manual Neutral)))",
+        "(Warmth
+        (Schedule
+          (Waypoint (CivilDawn (SignedMinutes -30))
+                    (Level Cold)
+                    (Ramp (Minutes 30)))
+          (Waypoint (CivilDusk (SignedMinutes -60))
+                    (Level Warmest)
+                    (Ramp (Minutes 60)))
+          (Default Neutral)))",
+    ));
+
+    let config = ConfigFile::from_path(config).config().expect("full config decodes");
+
+    let WarmthSchedule::Scheduled { waypoints, default } = config.warmth.schedule else {
+        panic!("expected scheduled warmth");
+    };
+    assert_eq!(default, WarmthLevel::Neutral);
+    assert_eq!(waypoints.len(), 2);
+    assert_eq!(waypoints[0].target, WarmthLevel::Cold);
+    assert_eq!(waypoints[0].ramp_duration.as_seconds(), 1800);
 }
 
 #[test]

@@ -72,9 +72,10 @@ report, not a pull request.
    CLI verbs. There is no polymorphic `Set(axis, value)` enum
    that mixes concerns.
 
-7. **The supervisor is the only `spawn` site.** Every other
-   actor is `spawn_linked` from its parent's `pre_start`.
-   Failures escalate.
+7. **The runtime root owns actor topology.** Chroma actors are
+   Kameo actors. Concern actors do not create hidden runtimes
+   with raw tasks, unbounded channels, or shared mutexes.
+   Side effects belong to the concern actor that owns them.
 
 8. **No `Arc<Mutex<T>>` between actors.** State is owned;
    communication is messages.
@@ -133,7 +134,7 @@ If a change touches one of these, the change goes upstream
 - `~/primary/reports/system-specialist/28-chroma-unified-visual-daemon.md`
   — the design report.
 - `~/primary/skills/rust-discipline.md` — methods on types,
-  domain newtypes, errors, ractor, redb + rkyv.
+  domain newtypes, errors, actor shape, redb + rkyv.
 - `~/primary/skills/push-not-pull.md` — subscription discipline.
 - `~/primary/skills/abstractions.md` — verb belongs to noun.
 - `~/primary/skills/micro-components.md` — one capability per
@@ -142,8 +143,8 @@ If a change touches one of these, the change goes upstream
 - `~/primary/skills/nix-discipline.md` — flake hygiene.
 - `HARD-CONSTRAINTS.md` — non-negotiable architecture locks
   and their tests.
-- `lore/rust/ractor.md` — actor template, perfect-specificity
-  messages, supervision.
+- `~/primary/skills/kameo.md` — Kameo actor runtime.
+- `~/primary/skills/actor-systems.md` — actor-system discipline.
 - `lore/rust/rkyv.md` — wire-format discipline, feature pinning.
 - `~/primary/repos/signal` — the canonical signal pattern.
 - `~/primary/repos/lojix-cli` — canonical NOTA-on-argv CLI.

@@ -31,6 +31,34 @@ pub enum Error {
     #[error("dbus: {0}")]
     Dbus(#[from] zbus::Error),
 
+    /// DBus freedesktop interface error.
+    #[error("dbus fdo: {0}")]
+    DbusFdo(#[from] zbus::fdo::Error),
+
+    /// The redb database could not be opened or created.
+    #[error("redb database: {0}")]
+    RedbDatabase(#[source] Box<redb::DatabaseError>),
+
+    /// A redb table operation failed.
+    #[error("redb table: {0}")]
+    RedbTable(#[source] Box<redb::TableError>),
+
+    /// A redb transaction could not be started.
+    #[error("redb transaction: {0}")]
+    RedbTransaction(#[source] Box<redb::TransactionError>),
+
+    /// A redb write transaction could not be committed.
+    #[error("redb commit: {0}")]
+    RedbCommit(#[source] Box<redb::CommitError>),
+
+    /// A redb storage operation failed.
+    #[error("redb storage: {0}")]
+    RedbStorage(#[source] Box<redb::StorageError>),
+
+    /// A typed actor call failed.
+    #[error("actor call: {message}")]
+    ActorCall { message: String },
+
     /// The daemon refused a request — see [`Self::message`].
     #[error("daemon: {message}")]
     Daemon { message: String },
@@ -42,3 +70,33 @@ pub enum Error {
 
 /// Crate-local result alias.
 pub type Result<T> = core::result::Result<T, Error>;
+
+impl From<redb::DatabaseError> for Error {
+    fn from(error: redb::DatabaseError) -> Self {
+        Self::RedbDatabase(Box::new(error))
+    }
+}
+
+impl From<redb::TableError> for Error {
+    fn from(error: redb::TableError) -> Self {
+        Self::RedbTable(Box::new(error))
+    }
+}
+
+impl From<redb::TransactionError> for Error {
+    fn from(error: redb::TransactionError) -> Self {
+        Self::RedbTransaction(Box::new(error))
+    }
+}
+
+impl From<redb::CommitError> for Error {
+    fn from(error: redb::CommitError) -> Self {
+        Self::RedbCommit(Box::new(error))
+    }
+}
+
+impl From<redb::StorageError> for Error {
+    fn from(error: redb::StorageError) -> Self {
+        Self::RedbStorage(Box::new(error))
+    }
+}

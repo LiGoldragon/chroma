@@ -66,7 +66,7 @@ impl fmt::Display for RampDuration {
 // `(Seconds <n>)`. Decoder accepts either.
 impl NotaEncode for RampDuration {
     fn encode(&self, encoder: &mut Encoder) -> nota_codec::Result<()> {
-        if self.0 % 60 == 0 {
+        if self.0.is_multiple_of(60) {
             encoder.start_record("Minutes")?;
             encoder.write_u64(self.0 / 60)?;
             encoder.end_record()

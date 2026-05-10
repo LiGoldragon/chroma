@@ -1,4 +1,4 @@
-use chroma::ThemeMode;
+use chroma::{ThemeMode, ThemePalette};
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode};
 
 fn round_trip_nota<T>(value: &T) -> T
@@ -55,4 +55,19 @@ fn nota_encodes_as_pascal_variant_name() {
     let mut encoder = Encoder::new();
     ThemeMode::Light.encode(&mut encoder).expect("encode");
     assert_eq!(encoder.into_string(), "Light");
+}
+
+#[test]
+fn ghostty_palette_lines_emit_sixteen_indexed_entries() {
+    let palette = ThemePalette::from_base16_slots([
+        "#000000", "#111111", "#222222", "#333333", "#444444", "#555555", "#666666", "#777777", "#888888", "#999999",
+        "#aaaaaa", "#bbbbbb", "#cccccc", "#dddddd", "#eeeeee", "#ffffff",
+    ]);
+
+    let lines = palette.ghostty_palette_lines();
+
+    assert!(lines.contains("palette = 0=#000000"));
+    assert!(lines.contains("palette = 1=#888888"));
+    assert!(lines.contains("palette = 15=#777777"));
+    assert_eq!(lines.lines().count(), 16);
 }

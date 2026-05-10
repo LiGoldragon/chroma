@@ -77,22 +77,20 @@ Supervisor
 │   ├── GhosttyThemeConcern
 │   └── EmacsThemeConcern
 ├── WarmthApplier                    (zbus to wl-gammarelay-rs Temperature)
-│   └── WarmthRampSession*           (per active ramp; spawn-linked)
+│   └── generation-cancelled ramp task owned by WarmthApplier
 ├── BrightnessApplier                (zbus to wl-gammarelay-rs Brightness)
-│   └── BrightnessRampSession*       (per active ramp; spawn-linked)
+│   └── generation-cancelled ramp task owned by BrightnessApplier
 ├── ScheduleEngine                   (parsed config, next-fire deadline)
-│   └── GeoclueSubscriber†           (zbus to geoclue2; spawned conditionally)
-├── SocketServer                     (UDS at $XDG_RUNTIME_DIR/chroma.sock)
-└── ConfigWatcher                    (inotify on config.nota)
+│   └── Geoclue location read when civil triggers are present
+└── Socket accept loop               (UDS at $XDG_RUNTIME_DIR/chroma.sock)
 
-* zero or one at any moment
-† spawned only if any axis schedule uses civil-twilight triggers
 ```
 
-Per ractor discipline (lore's `rust/ractor.md`): each actor's
-message type is its own enum with one variant per request kind
-(perfect specificity); state is owned, not shared; failures
-escalate; bare `Actor::spawn` runs only at the supervisor.
+Per Kameo discipline (`~/primary/skills/kameo.md` and
+`~/primary/skills/actor-systems.md`): actor structs own their
+state; messages are typed per kind; side-effect latency is
+contained to the actor for that concern; state is not shared
+through mutexes.
 
 ## IPC shape — the canonical signal pattern
 

@@ -26,6 +26,7 @@ pub trait GammaRelay {
 }
 
 /// A long-lived client to the running `wl-gammarelay-rs` daemon.
+#[derive(Clone)]
 pub struct GammaClient {
     proxy: GammaRelayProxy<'static>,
 }

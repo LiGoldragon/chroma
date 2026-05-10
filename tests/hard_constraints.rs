@@ -24,3 +24,41 @@ fn hc_chroma_007_cli_does_not_emit_live_terminal_palette_sequences() {
     assert!(!theme_source.contains("terminal_osc_sequence"));
     assert!(!theme_source.contains("\\x1b]4;"));
 }
+
+#[test]
+fn hc_chroma_008_runtime_uses_kameo_not_hand_rolled_task_actors() {
+    let daemon_source = include_str!("../src/daemon.rs");
+    let theme_source = include_str!("../src/theme.rs");
+
+    assert!(daemon_source.contains("impl Actor for ChromaRoot"));
+    assert!(theme_source.contains("impl Actor for ThemeApplier"));
+    assert!(!daemon_source.contains("tokio::spawn"));
+    assert!(!theme_source.contains("tokio::spawn"));
+    assert!(!theme_source.contains("unbounded_channel"));
+    assert!(!daemon_source.contains("AbortHandle"));
+    assert!(!theme_source.contains("AbortHandle"));
+}
+
+#[test]
+fn hc_chroma_009_runtime_has_no_shared_mutex_between_actors() {
+    let daemon_source = include_str!("../src/daemon.rs");
+    let theme_source = include_str!("../src/theme.rs");
+    let state_source = include_str!("../src/state.rs");
+
+    for source in [daemon_source, theme_source, state_source] {
+        assert!(!source.contains("Arc<Mutex"));
+        assert!(!source.contains("std::sync::Mutex"));
+        assert!(!source.contains("tokio::sync::Mutex"));
+    }
+}
+
+#[test]
+fn hc_chroma_010_ghostty_concern_uses_native_config_and_systemd_dbus_reload() {
+    let theme_source = include_str!("../src/theme.rs");
+
+    assert!(theme_source.contains("config.ghostty"));
+    assert!(theme_source.contains("ReloadUnit"));
+    assert!(theme_source.contains("app-com.mitchellh.ghostty.service"));
+    assert!(!theme_source.contains("systemctl"));
+    assert!(!theme_source.contains("ghostty-reload"));
+}

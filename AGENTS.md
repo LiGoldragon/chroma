@@ -53,12 +53,13 @@ report is
   domain records. State is read on boot and re-applied to
   hardware so resume / login / wake never drifts. See
   `~/primary/skills/rust-discipline.md` §"redb + rkyv".
-- **Ractor for stateful components.** Each running concern is
-  an actor with its own typed message enum (perfect-specificity
-  per request kind). State is owned, not shared. The
-  supervisor is the only place bare `Actor::spawn` runs; every
-  child is `spawn_linked` from a parent's `pre_start`. See
-  `lore/rust/ractor.md`.
+- **Kameo for stateful components.** Each running concern is a
+  Kameo actor with typed per-kind messages. State is owned by
+  the actor, not shared through locks. The runtime root owns the
+  topology; concern actors never rebuild actor semantics with
+  raw tasks, unbounded channels, or shared mutexes. See
+  `~/primary/skills/kameo.md` and
+  `~/primary/skills/actor-systems.md`.
 
 ## Style
 
@@ -98,7 +99,8 @@ prompts (always `-m '<msg>'`).
 - `~/primary/skills/push-not-pull.md` — subscription discipline.
 - `~/primary/skills/abstractions.md` — verb-belongs-to-noun.
 - `~/primary/skills/beauty.md` — beauty as criterion.
-- `lore/rust/ractor.md` — actor template.
+- `~/primary/skills/kameo.md` — Kameo actor runtime.
+- `~/primary/skills/actor-systems.md` — actor-system discipline.
 - `lore/rust/rkyv.md` — wire format discipline.
 - `HARD-CONSTRAINTS.md` — architecture locks and matching tests.
 - `~/primary/repos/signal` — canonical signal pattern reference.
