@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{DateTime, Local, LocalResult, NaiveDate, TimeZone};
+use futures_util::StreamExt;
 use kameo::actor::{Actor, ActorRef, Spawn};
 use kameo::error::Infallible;
 use kameo::message::{Context, Message};
@@ -34,12 +35,17 @@ use crate::time::{LocalHour, LocalMinute, RampDuration, RampTrigger, SignedMinut
 use crate::warmth::{KelvinTemperature, WarmthSchedule};
 use crate::wire::{read_frame, socket_path, write_frame};
 
+const GEOCLUE_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+const POST_RESUME_LOCATION_REFRESH_DELAY: Duration = Duration::from_secs(5);
+const LOCATION_REFRESH_RETRY_DELAY: Duration = Duration::from_secs(300);
+
 /// Run the daemon until SIGTERM / Ctrl-C.
 pub async fn run() -> Result<()> {
     let config_file = ConfigFile::from_default_locations()?;
     let config = config_file.config()?;
     let root = ChromaRoot::start(config).await?;
     let config_watcher = ConfigWatcher::start(config_file, root.clone()).await?;
+    let sleep_watcher = SleepTransitionWatcher::start(root.clone()).await;
     root.ask(BeginSchedule).await.map_err(|error| Error::ActorCall { message: error.to_string() })?;
 
     let path = socket_path();
@@ -69,6 +75,8 @@ pub async fn run() -> Result<()> {
     }
 
     let _ = config_watcher.stop_gracefully().await;
+    let _ = sleep_watcher.stop_gracefully().await;
+    sleep_watcher.wait_for_shutdown().await;
     config_watcher.wait_for_shutdown().await;
     let _ = root.stop_gracefully().await;
     root.wait_for_shutdown().await;
@@ -271,7 +279,7 @@ impl ChromaRoot {
 
         self.enqueue_theme(self.theme).await?;
         next_schedule_engine
-            .tell(EvaluateSchedule)
+            .tell(ReconcileSchedule)
             .await
             .map_err(|error| Error::ActorCall { message: error.to_string() })?;
 
@@ -323,7 +331,7 @@ impl Message<BeginSchedule> for ChromaRoot {
             .schedule_engine
             .as_ref()
             .ok_or_else(|| Error::Daemon { message: "schedule engine is not installed".into() })?;
-        schedule_engine.tell(EvaluateSchedule).await.map_err(|error| Error::ActorCall { message: error.to_string() })
+        schedule_engine.tell(ReconcileSchedule).await.map_err(|error| Error::ActorCall { message: error.to_string() })
     }
 }
 
@@ -336,6 +344,100 @@ impl Message<InstallSchedule> for ChromaRoot {
 
     async fn handle(&mut self, message: InstallSchedule, _context: &mut Context<Self, Self::Reply>) -> Self::Reply {
         self.schedule_engine = Some(message.schedule_engine);
+        Ok(())
+    }
+}
+
+struct ResumeFromSleep;
+
+impl Message<ResumeFromSleep> for ChromaRoot {
+    type Reply = ();
+
+    async fn handle(&mut self, _message: ResumeFromSleep, _context: &mut Context<Self, Self::Reply>) {
+        let Some(schedule_engine) = self.schedule_engine.as_ref() else {
+            eprintln!("chroma-daemon resume ignored because schedule engine is not installed");
+            return;
+        };
+        if let Err(error) = schedule_engine.tell(ResumeSchedule).await {
+            eprintln!("chroma-daemon resume schedule enqueue error: {error}");
+        }
+    }
+}
+
+struct SleepTransitionWatcher {
+    root: ActorRef<ChromaRoot>,
+}
+
+impl SleepTransitionWatcher {
+    async fn start(root: ActorRef<ChromaRoot>) -> ActorRef<Self> {
+        let reference = Self::spawn(Self { root });
+        reference.wait_for_startup().await;
+        if let Err(error) = reference.tell(StartWatchingSleepTransitions).await {
+            eprintln!("chroma-daemon sleep watcher start error: {error}");
+        }
+        reference
+    }
+}
+
+impl Actor for SleepTransitionWatcher {
+    type Args = Self;
+    type Error = Infallible;
+
+    async fn on_start(watcher: Self::Args, _reference: ActorRef<Self>) -> std::result::Result<Self, Self::Error> {
+        Ok(watcher)
+    }
+}
+
+struct StartWatchingSleepTransitions;
+
+impl Message<StartWatchingSleepTransitions> for SleepTransitionWatcher {
+    type Reply = DelegatedReply<()>;
+
+    async fn handle(
+        &mut self,
+        _message: StartWatchingSleepTransitions,
+        context: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let root = self.root.clone();
+        context.spawn(async move {
+            match SleepTransitionSubscription::connect(root).await {
+                Ok(mut subscription) => {
+                    if let Err(error) = subscription.run().await {
+                        eprintln!("chroma-daemon sleep watcher error: {error}");
+                    }
+                }
+                Err(error) => eprintln!("chroma-daemon sleep watcher connect error: {error}"),
+            }
+        })
+    }
+}
+
+struct SleepTransitionSubscription {
+    root: ActorRef<ChromaRoot>,
+    signals: zbus::proxy::SignalStream<'static>,
+}
+
+impl SleepTransitionSubscription {
+    async fn connect(root: ActorRef<ChromaRoot>) -> Result<Self> {
+        let connection = zbus::Connection::system().await?;
+        let manager = zbus::Proxy::new(
+            &connection,
+            "org.freedesktop.login1",
+            "/org/freedesktop/login1",
+            "org.freedesktop.login1.Manager",
+        )
+        .await?;
+        let signals = manager.receive_signal("PrepareForSleep").await?;
+        Ok(Self { root, signals })
+    }
+
+    async fn run(&mut self) -> Result<()> {
+        while let Some(message) = self.signals.next().await {
+            let sleeping = message.body().deserialize::<bool>()?;
+            if !sleeping && let Err(error) = self.root.tell(ResumeFromSleep).await {
+                eprintln!("chroma-daemon resume enqueue error: {error}");
+            }
+        }
         Ok(())
     }
 }
@@ -680,7 +782,8 @@ struct ScheduleEngine {
     config: Config,
     root: ActorRef<ChromaRoot>,
     location: Option<Location>,
-    evaluation_count: u64,
+    schedule_generation: u64,
+    location_generation: u64,
 }
 
 impl ScheduleEngine {
@@ -688,6 +791,78 @@ impl ScheduleEngine {
         let reference = Self::spawn(ScheduleArgs { config, root });
         reference.wait_for_startup().await;
         reference
+    }
+
+    async fn current_location() -> Option<Location> {
+        match timeout(GEOCLUE_REQUEST_TIMEOUT, GeoclueLocator::current_location()).await {
+            Ok(Ok(location)) => Some(location),
+            Ok(Err(error)) => {
+                eprintln!("chroma-daemon geoclue location error: {error}");
+                None
+            }
+            Err(_) => {
+                eprintln!("chroma-daemon geoclue location timed out");
+                None
+            }
+        }
+    }
+
+    fn next_schedule_generation(&mut self) -> u64 {
+        self.schedule_generation = self.schedule_generation.saturating_add(1);
+        self.schedule_generation
+    }
+
+    fn request_location_refresh(&mut self, context: &mut Context<Self, ()>, delay: Duration) {
+        if !self.config.needs_geolocation() {
+            return;
+        }
+        self.location_generation = self.location_generation.saturating_add(1);
+        let generation = self.location_generation;
+        let delivery = context.actor_ref().tell(LocationRefreshDue { generation });
+        if delay.is_zero() {
+            let _sent = delivery.try_send();
+        } else {
+            let _scheduled = delivery.send_after(delay);
+        }
+    }
+
+    async fn reconcile(&mut self, generation: u64, context: &mut Context<Self, ()>) {
+        let now = Local::now();
+        let plan = SchedulePlan::from_config(&self.config, self.location, now);
+        if let Err(error) = self.root.tell(ApplyScheduledState { values: plan.values }).await {
+            eprintln!("chroma-daemon schedule enqueue error: {error}");
+        }
+        if let Some(next) = plan.next_delay_from(now) {
+            let _scheduled = context.actor_ref().tell(ScheduledScheduleEvaluation { generation }).send_after(next);
+        } else if self.config.needs_geolocation() && self.location.is_none() {
+            let _retry = context
+                .actor_ref()
+                .tell(ScheduledScheduleEvaluation { generation })
+                .send_after(LOCATION_REFRESH_RETRY_DELAY);
+        }
+    }
+
+    async fn complete_location_refresh(
+        &mut self,
+        generation: u64,
+        location: Option<Location>,
+        context: &mut Context<Self, ()>,
+    ) {
+        if generation != self.location_generation {
+            return;
+        }
+        match location {
+            Some(location) if self.location != Some(location) => {
+                self.location = Some(location);
+                let schedule_generation = self.next_schedule_generation();
+                self.reconcile(schedule_generation, context).await;
+            }
+            Some(_) => {}
+            None if self.location.is_none() => {
+                self.request_location_refresh(context, LOCATION_REFRESH_RETRY_DELAY);
+            }
+            None => {}
+        }
     }
 }
 
@@ -701,42 +876,91 @@ impl Actor for ScheduleEngine {
     type Error = Infallible;
 
     async fn on_start(args: Self::Args, _reference: ActorRef<Self>) -> std::result::Result<Self, Self::Error> {
-        let location = if args.config.needs_geolocation() {
-            match timeout(Duration::from_secs(2), GeoclueLocator::current_location()).await {
-                Ok(Ok(location)) => Some(location),
-                Ok(Err(error)) => {
-                    eprintln!("chroma-daemon geoclue location error: {error}");
-                    None
-                }
-                Err(_) => {
-                    eprintln!("chroma-daemon geoclue location timed out");
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        Ok(Self { config: args.config, root: args.root, location, evaluation_count: 0 })
+        Ok(Self {
+            config: args.config,
+            root: args.root,
+            location: None,
+            schedule_generation: 0,
+            location_generation: 0,
+        })
     }
 }
 
-struct EvaluateSchedule;
+struct ResumeSchedule;
 
-impl Message<EvaluateSchedule> for ScheduleEngine {
+impl Message<ResumeSchedule> for ScheduleEngine {
     type Reply = ();
 
-    async fn handle(&mut self, _message: EvaluateSchedule, context: &mut Context<Self, Self::Reply>) {
-        self.evaluation_count = self.evaluation_count.saturating_add(1);
-        let now = Local::now();
-        let plan = SchedulePlan::from_config(&self.config, self.location, now);
-        if let Err(error) = self.root.tell(ApplyScheduledState { values: plan.values }).await {
-            eprintln!("chroma-daemon schedule enqueue error: {error}");
+    async fn handle(&mut self, _message: ResumeSchedule, context: &mut Context<Self, Self::Reply>) {
+        let generation = self.next_schedule_generation();
+        self.reconcile(generation, context).await;
+        self.request_location_refresh(context, POST_RESUME_LOCATION_REFRESH_DELAY);
+    }
+}
+
+struct ReconcileSchedule;
+
+impl Message<ReconcileSchedule> for ScheduleEngine {
+    type Reply = ();
+
+    async fn handle(&mut self, _message: ReconcileSchedule, context: &mut Context<Self, Self::Reply>) {
+        let generation = self.next_schedule_generation();
+        self.reconcile(generation, context).await;
+        if self.location.is_none() {
+            self.request_location_refresh(context, Duration::ZERO);
         }
-        if let Some(next) = plan.next_delay_from(now) {
-            let _scheduled = context.actor_ref().tell(EvaluateSchedule).send_after(next);
-        } else if self.config.needs_geolocation() && self.location.is_none() {
-            let _retry = context.actor_ref().tell(EvaluateSchedule).send_after(Duration::from_secs(300));
+    }
+}
+
+struct ScheduledScheduleEvaluation {
+    generation: u64,
+}
+
+impl Message<ScheduledScheduleEvaluation> for ScheduleEngine {
+    type Reply = ();
+
+    async fn handle(&mut self, message: ScheduledScheduleEvaluation, context: &mut Context<Self, Self::Reply>) {
+        if message.generation == self.schedule_generation {
+            self.reconcile(message.generation, context).await;
+            if self.location.is_none() {
+                self.request_location_refresh(context, Duration::ZERO);
+            }
         }
+    }
+}
+
+struct LocationRefreshDue {
+    generation: u64,
+}
+
+impl Message<LocationRefreshDue> for ScheduleEngine {
+    type Reply = DelegatedReply<()>;
+
+    async fn handle(&mut self, message: LocationRefreshDue, context: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if message.generation != self.location_generation {
+            return context.spawn(async {});
+        }
+        let actor = context.actor_ref().clone();
+        context.spawn(async move {
+            let location = ScheduleEngine::current_location().await;
+            if let Err(error) = actor.tell(LocationRefreshCompleted { generation: message.generation, location }).await
+            {
+                eprintln!("chroma-daemon location refresh completion enqueue error: {error}");
+            }
+        })
+    }
+}
+
+struct LocationRefreshCompleted {
+    generation: u64,
+    location: Option<Location>,
+}
+
+impl Message<LocationRefreshCompleted> for ScheduleEngine {
+    type Reply = ();
+
+    async fn handle(&mut self, message: LocationRefreshCompleted, context: &mut Context<Self, Self::Reply>) {
+        self.complete_location_refresh(message.generation, message.location, context).await;
     }
 }
 
@@ -915,7 +1139,7 @@ fn civil_time_on(
     Some(utc.with_timezone(&Local) + chrono::Duration::minutes(offset.as_i16() as i64))
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Location {
     latitude: f64,
     longitude: f64,

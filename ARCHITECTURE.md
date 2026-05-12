@@ -89,6 +89,7 @@ Supervisor
 │   └── generation-cancelled ramp task owned by BrightnessApplier
 ├── ScheduleEngine                   (parsed config, next-fire deadline)
 │   └── Geoclue location read when civil triggers are present
+├── SleepTransitionWatcher           (logind PrepareForSleep resume push)
 └── Socket accept loop               (UDS at $XDG_RUNTIME_DIR/chroma.sock)
 
 ```
@@ -148,6 +149,17 @@ Triggers: `(CivilDawn (SignedMinutes <n>))`,
 The geoclue read runs iff any axis uses a twilight trigger; if
 geolocation is unavailable, the schedule actor retries on a
 bounded delayed message instead of running a polling loop.
+Resume from suspend is another schedule input: Chroma subscribes
+to systemd-logind's `PrepareForSleep` signal and reconciles the
+current wall-clock schedule immediately on the post-resume
+transition. Geolocation refresh is a separate delayed flow after
+resume so a slow or cold geoclue read cannot block time-of-day
+theme, warmth, or brightness changes. If the fresh location differs
+from the schedule actor's held location, Chroma reconciles the
+schedule again using that location. Each schedule reconciliation
+increments a generation counter so stale delayed messages from
+before suspend or config reload cannot keep an old deadline chain
+alive.
 Data-format inputs at the Chroma boundary are NOTA; YAML and YML
 inputs are rejected. `GhosttyConfigTemplates` paths are references
 to complete Ghostty-native config files produced by the host

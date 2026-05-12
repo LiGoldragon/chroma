@@ -87,3 +87,42 @@ fn hc_chroma_012_geoclue_uses_system_bus() {
     assert!(daemon_source.contains("zbus::Connection::system().await?"));
     assert!(!daemon_source.contains("zbus::Connection::session().await?"));
 }
+
+#[test]
+fn hc_chroma_013_resume_reconciles_schedule_from_login1_prepare_for_sleep() {
+    let daemon_source = include_str!("../src/daemon.rs");
+
+    assert!(daemon_source.contains("struct SleepTransitionWatcher"));
+    assert!(daemon_source.contains("org.freedesktop.login1"));
+    assert!(daemon_source.contains("org.freedesktop.login1.Manager"));
+    assert!(daemon_source.contains("PrepareForSleep"));
+    assert!(daemon_source.contains("deserialize::<bool>()"));
+    assert!(daemon_source.contains("struct ResumeFromSleep"));
+    assert!(daemon_source.contains("tell(ResumeSchedule)"));
+}
+
+#[test]
+fn hc_chroma_014_schedule_reconcile_cancels_stale_deadline_chains() {
+    let daemon_source = include_str!("../src/daemon.rs");
+
+    assert!(daemon_source.contains("schedule_generation"));
+    assert!(daemon_source.contains("struct ScheduledScheduleEvaluation"));
+    assert!(daemon_source.contains("generation: u64"));
+    assert!(daemon_source.contains("self.schedule_generation = self.schedule_generation.saturating_add(1)"));
+    assert!(daemon_source.contains("if message.generation == self.schedule_generation"));
+    assert!(!daemon_source.contains("tell(EvaluateSchedule).send_after"));
+}
+
+#[test]
+fn hc_chroma_015_resume_location_refresh_is_separate_from_time_reconcile() {
+    let daemon_source = include_str!("../src/daemon.rs");
+
+    assert!(daemon_source.contains("struct ResumeSchedule"));
+    assert!(daemon_source.contains("self.reconcile(generation, context).await;"));
+    assert!(daemon_source.contains("POST_RESUME_LOCATION_REFRESH_DELAY"));
+    assert!(daemon_source.contains("struct LocationRefreshDue"));
+    assert!(daemon_source.contains("struct LocationRefreshCompleted"));
+    assert!(daemon_source.contains("context.spawn(async move"));
+    assert!(daemon_source.contains("let location = ScheduleEngine::current_location().await;"));
+    assert!(daemon_source.contains("Some(location) if self.location != Some(location)"));
+}

@@ -84,3 +84,33 @@ application configuration. Chroma must not ask the session bus for
 `org.freedesktop.GeoClue2`.
 
 Test: `hc_chroma_012_geoclue_uses_system_bus`.
+
+## HC-CHROMA-009 — Resume Reconciles Scheduled Visual State
+
+Suspend does not satisfy a wall-clock visual schedule. Chroma
+subscribes to the systemd-logind `PrepareForSleep` signal on the
+system bus and treats the post-resume `false` transition as a
+schedule reconciliation request. It does not wait for the old
+monotonic delayed message to expire after wake. The wall-clock
+reconciliation runs before geolocation refresh.
+
+Test: `hc_chroma_013_resume_reconciles_schedule_from_login1_prepare_for_sleep`.
+
+## HC-CHROMA-010 — Schedule Deadlines Are Generation-Bounded
+
+Any out-of-band schedule reconciliation, including resume and
+config reload, invalidates older delayed schedule messages. A stale
+deadline may wake, but it must not apply visual state or schedule a
+new deadline chain.
+
+Test: `hc_chroma_014_schedule_reconcile_cancels_stale_deadline_chains`.
+
+## HC-CHROMA-011 — Location Refresh Is A Separate Resume Flow
+
+Resume schedules a delayed geolocation refresh after the immediate
+wall-clock reconciliation. The geolocation read must not block
+time-of-day visual changes. If the fresh location differs from the
+location held by the schedule actor, the actor reconciles the
+schedule again using the new location.
+
+Test: `hc_chroma_015_resume_location_refresh_is_separate_from_time_reconcile`.
