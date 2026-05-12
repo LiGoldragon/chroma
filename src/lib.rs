@@ -30,7 +30,10 @@ pub use config::{Config, ConfigFile};
 pub use error::{Error, Result};
 pub use request::Request;
 pub use response::Response;
-pub use state::{ReadStoredState, RecordBrightness, RecordTheme, RecordWarmth, StateStore, StoredVisualState};
+pub use state::{
+    ReadStoredLocation, ReadStoredState, RecordBrightness, RecordLocation, RecordTheme, RecordWarmth, StateStore,
+    StoredLocation, StoredVisualState,
+};
 pub use theme::{
     GhosttyConfigTemplates, ThemeAdapters, ThemeApplier, ThemeAxis, ThemeConcern, ThemeMode, ThemePalette,
     ThemePalettes, ThemeSchedule, ThemeWaypoint,

@@ -114,3 +114,16 @@ location held by the schedule actor, the actor reconciles the
 schedule again using the new location.
 
 Test: `hc_chroma_015_resume_location_refresh_is_separate_from_time_reconcile`.
+
+## HC-CHROMA-012 — Missing Location Never Applies Civil Defaults
+
+Daemon startup reapplies the persisted visual state before schedule
+evaluation. A scheduled axis that contains civil dawn/dusk triggers
+and has no held location must not apply its configured default as if
+it were a real daytime/nighttime answer; that axis waits unchanged
+while a separate geolocation refresh runs. Last-known geolocation is
+persisted and may be used for immediate wall-clock reconciliation,
+then corrected by the fresh geolocation flow if the platform reports
+a different location.
+
+Test: `hc_chroma_016_startup_reapplies_state_and_civil_axes_wait_for_location`.

@@ -11,6 +11,7 @@ use kameo::actor::{Actor, ActorRef, Spawn};
 use kameo::error::Infallible;
 use kameo::message::{Context, Message};
 use redb::{Database, TableDefinition};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::brightness::BrightnessPercent;
 use crate::error::{Error, Result};
@@ -20,6 +21,7 @@ use crate::warmth::KelvinTemperature;
 const THEME_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("theme");
 const WARMTH_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("warmth");
 const BRIGHTNESS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("brightness");
+const LOCATION_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("location");
 const CURRENT_KEY: &str = "current";
 
 /// The daemon's current visual state.
@@ -28,6 +30,27 @@ pub struct StoredVisualState {
     pub theme: ThemeMode,
     pub kelvin: KelvinTemperature,
     pub percent: BrightnessPercent,
+}
+
+/// Last geoclue position known to the schedule engine.
+#[derive(Debug, Clone, Copy, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+pub struct StoredLocation {
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
+impl StoredLocation {
+    /// Archive into bytes for redb persistence.
+    pub fn archive(&self) -> Result<Vec<u8>> {
+        rkyv::to_bytes::<rkyv::rancor::Error>(self)
+            .map(|bytes| bytes.to_vec())
+            .map_err(|err| Error::RkyvCodec(err.to_string()))
+    }
+
+    /// Decode a redb-stored rkyv archive.
+    pub fn from_archive(bytes: &[u8]) -> Result<Self> {
+        rkyv::from_bytes::<Self, rkyv::rancor::Error>(bytes).map_err(|err| Error::RkyvCodec(err.to_string()))
+    }
 }
 
 /// redb owner for Chroma's persisted state.
@@ -72,6 +95,7 @@ impl StateStore {
             transaction.open_table(THEME_TABLE)?;
             transaction.open_table(WARMTH_TABLE)?;
             transaction.open_table(BRIGHTNESS_TABLE)?;
+            transaction.open_table(LOCATION_TABLE)?;
         }
         transaction.commit()?;
         Ok(())
@@ -87,6 +111,10 @@ impl StateStore {
 
     fn record_brightness(&self, percent: BrightnessPercent) -> Result<()> {
         self.write_archive(BRIGHTNESS_TABLE, &percent.archive()?)
+    }
+
+    fn record_location(&self, location: StoredLocation) -> Result<()> {
+        self.write_archive(LOCATION_TABLE, &location.archive()?)
     }
 
     fn write_archive(&self, definition: TableDefinition<&str, &[u8]>, bytes: &[u8]) -> Result<()> {
@@ -132,6 +160,15 @@ impl StateStore {
             return Ok(None);
         };
         Ok(Some(BrightnessPercent::from_archive(bytes.value())?))
+    }
+
+    fn read_location(&self) -> Result<Option<StoredLocation>> {
+        let transaction = self.database.begin_read()?;
+        let table = transaction.open_table(LOCATION_TABLE)?;
+        let Some(bytes) = table.get(CURRENT_KEY)? else {
+            return Ok(None);
+        };
+        Ok(Some(StoredLocation::from_archive(bytes.value())?))
     }
 }
 
@@ -183,6 +220,19 @@ impl Message<RecordBrightness> for StateStore {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RecordLocation {
+    pub location: StoredLocation,
+}
+
+impl Message<RecordLocation> for StateStore {
+    type Reply = Result<()>;
+
+    async fn handle(&mut self, message: RecordLocation, _context: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.record_location(message.location)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReadStoredState {
     pub fallback: StoredVisualState,
@@ -193,6 +243,17 @@ impl Message<ReadStoredState> for StateStore {
 
     async fn handle(&mut self, message: ReadStoredState, _context: &mut Context<Self, Self::Reply>) -> Self::Reply {
         self.read_state(message.fallback)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadStoredLocation;
+
+impl Message<ReadStoredLocation> for StateStore {
+    type Reply = Result<Option<StoredLocation>>;
+
+    async fn handle(&mut self, _message: ReadStoredLocation, _context: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.read_location()
     }
 }
 

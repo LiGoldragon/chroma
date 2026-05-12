@@ -149,14 +149,19 @@ Triggers: `(CivilDawn (SignedMinutes <n>))`,
 The geoclue read runs iff any axis uses a twilight trigger; if
 geolocation is unavailable, the schedule actor retries on a
 bounded delayed message instead of running a polling loop.
+Daemon startup first reapplies the persisted visual state to the
+appliers, then evaluates the schedule. If a civil-trigger axis has
+no held or persisted location yet, that axis is left unchanged
+instead of applying its configured default; defaults are not a
+substitute for an unresolved civil dawn/dusk answer.
 Resume from suspend is another schedule input: Chroma subscribes
 to systemd-logind's `PrepareForSleep` signal and reconciles the
 current wall-clock schedule immediately on the post-resume
 transition. Geolocation refresh is a separate delayed flow after
 resume so a slow or cold geoclue read cannot block time-of-day
 theme, warmth, or brightness changes. If the fresh location differs
-from the schedule actor's held location, Chroma reconciles the
-schedule again using that location. Each schedule reconciliation
+from the schedule actor's held location, Chroma persists it and
+reconciles the schedule again using that location. Each schedule reconciliation
 increments a generation counter so stale delayed messages from
 before suspend or config reload cannot keep an old deadline chain
 alive.
@@ -181,7 +186,11 @@ write back to those source paths.
 Every transition is one redb write transaction. Redb-write
 happens **before** the hardware write so a crash mid-apply
 leaves redb in the new state and the next boot reapplies. The
-version-skew guard at boot hard-fails on mismatch.
+schedule engine also persists last-known geolocation after a
+successful geoclue refresh so daemon startup can perform immediate
+civil-trigger reconciliation from the last known position while a
+fresh geolocation request runs separately. The version-skew guard at
+boot hard-fails on mismatch.
 
 ## Boundary contracts
 

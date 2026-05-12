@@ -126,3 +126,21 @@ fn hc_chroma_015_resume_location_refresh_is_separate_from_time_reconcile() {
     assert!(daemon_source.contains("let location = ScheduleEngine::current_location().await;"));
     assert!(daemon_source.contains("Some(location) if self.location != Some(location)"));
 }
+
+#[test]
+fn hc_chroma_016_startup_reapplies_state_and_civil_axes_wait_for_location() {
+    let daemon_source = include_str!("../src/daemon.rs");
+    let state_source = include_str!("../src/state.rs");
+
+    assert!(daemon_source.contains("struct ReapplyCurrentState"));
+    assert!(daemon_source.contains("root.ask(ReapplyCurrentState)"));
+    assert!(daemon_source.contains("theme: Option<ThemeMode>"));
+    assert!(daemon_source.contains("warmth: Option<ScheduledWarmth>"));
+    assert!(daemon_source.contains("brightness: Option<ScheduledBrightness>"));
+    assert!(daemon_source.contains("fn waiting() -> Self"));
+    assert!(daemon_source.contains("schedule.needs_geolocation() && location.is_none()"));
+    assert!(state_source.contains("struct StoredLocation"));
+    assert!(state_source.contains("const LOCATION_TABLE"));
+    assert!(state_source.contains("struct RecordLocation"));
+    assert!(state_source.contains("struct ReadStoredLocation"));
+}
