@@ -127,3 +127,19 @@ then corrected by the fresh geolocation flow if the platform reports
 a different location.
 
 Test: `hc_chroma_016_startup_reapplies_state_and_civil_axes_wait_for_location`.
+
+## HC-CHROMA-013 — Ramps Project Wall-Clock Progress
+
+A schedule reconciliation answers what should be true at the current
+wall-clock time. If Chroma starts or resumes after a ramp has already
+ended, the target applies immediately. If Chroma starts or resumes in
+the middle of a ramp, the daemon applies the interpolated current value
+for that elapsed point, then ramps only for the remaining duration.
+It must not replay the full ramp from the beginning after wake.
+
+Tests:
+
+- `hc_chroma_017_schedule_projects_elapsed_ramp_time`
+- `warmth_schedule_after_finished_ramp_is_settled_target`
+- `warmth_schedule_inside_ramp_projects_elapsed_position`
+- `brightness_schedule_inside_ramp_projects_elapsed_position`

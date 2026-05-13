@@ -11,31 +11,31 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use chrono::{DateTime, Local, LocalResult, NaiveDate, TimeZone};
+use chrono::Local;
 use futures_util::StreamExt;
 use kameo::actor::{Actor, ActorRef, Spawn};
 use kameo::error::Infallible;
 use kameo::message::{Context, Message};
 use kameo::reply::DelegatedReply;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher, recommended_watcher};
-use sunrise::{Coordinates, DawnType, SolarDay, SolarEvent};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::time::{Duration, Instant, MissedTickBehavior, interval, timeout};
 use zbus::zvariant::OwnedObjectPath;
 
-use crate::brightness::{BrightnessPercent, BrightnessSchedule};
+use crate::brightness::BrightnessPercent;
 use crate::config::{Config, ConfigFile};
 use crate::error::{Error, Result};
 use crate::gamma::GammaClient;
 use crate::request::Request;
 use crate::response::Response;
+use crate::schedule::{Location, SchedulePlan, ScheduledBrightness, ScheduledValues, ScheduledWarmth};
 use crate::state::{
     ReadStoredLocation, ReadStoredState, RecordBrightness, RecordLocation, RecordTheme, RecordWarmth, StateStore,
-    StoredLocation, StoredVisualState,
+    StoredVisualState,
 };
-use crate::theme::{ApplyTheme, ThemeApplier, ThemeMode, ThemeSchedule};
-use crate::time::{LocalHour, LocalMinute, RampDuration, RampTrigger, SignedMinutes};
-use crate::warmth::{KelvinTemperature, WarmthSchedule};
+use crate::theme::{ApplyTheme, ThemeApplier, ThemeMode};
+use crate::time::RampDuration;
+use crate::warmth::KelvinTemperature;
 use crate::wire::{read_frame, socket_path, write_frame};
 
 const GEOCLUE_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
@@ -214,6 +214,17 @@ impl ChromaRoot {
         Ok(Response::Accepted {})
     }
 
+    async fn schedule_warmth_transition(
+        &mut self,
+        current: KelvinTemperature,
+        target: KelvinTemperature,
+        remaining_duration: RampDuration,
+    ) -> Result<()> {
+        self.warmth = target;
+        self.persist_warmth(target).await?;
+        self.enqueue_warmth(WarmthApplication::RampFrom { current, target, duration: remaining_duration }).await
+    }
+
     async fn instant_brightness(&mut self, percent: BrightnessPercent) -> Result<Response> {
         self.brightness = percent;
         self.persist_brightness(percent).await?;
@@ -226,6 +237,17 @@ impl ChromaRoot {
         self.persist_brightness(target).await?;
         self.enqueue_brightness(BrightnessApplication::Ramp { target, duration }).await?;
         Ok(Response::Accepted {})
+    }
+
+    async fn schedule_brightness_transition(
+        &mut self,
+        current: BrightnessPercent,
+        target: BrightnessPercent,
+        remaining_duration: RampDuration,
+    ) -> Result<()> {
+        self.brightness = target;
+        self.persist_brightness(target).await?;
+        self.enqueue_brightness(BrightnessApplication::RampFrom { current, target, duration: remaining_duration }).await
     }
 
     async fn dispatch(&mut self, request: Request) -> Result<Response> {
@@ -264,22 +286,22 @@ impl ChromaRoot {
             self.set_theme(theme).await?;
         }
         if let Some(warmth) = values.warmth {
-            match warmth.ramp_duration {
-                Some(duration) => {
-                    self.ramp_warmth(warmth.kelvin, duration).await?;
+            match warmth {
+                ScheduledWarmth::Settled { kelvin } => {
+                    self.instant_warmth(kelvin).await?;
                 }
-                None => {
-                    self.instant_warmth(warmth.kelvin).await?;
+                ScheduledWarmth::Transition { current_kelvin, target_kelvin, remaining_duration } => {
+                    self.schedule_warmth_transition(current_kelvin, target_kelvin, remaining_duration).await?;
                 }
             }
         }
         if let Some(brightness) = values.brightness {
-            match brightness.ramp_duration {
-                Some(duration) => {
-                    self.ramp_brightness(brightness.percent, duration).await?;
+            match brightness {
+                ScheduledBrightness::Settled { percent } => {
+                    self.instant_brightness(percent).await?;
                 }
-                None => {
-                    self.instant_brightness(brightness.percent).await?;
+                ScheduledBrightness::Transition { current_percent, target_percent, remaining_duration } => {
+                    self.schedule_brightness_transition(current_percent, target_percent, remaining_duration).await?;
                 }
             }
         }
@@ -637,6 +659,7 @@ impl Actor for WarmthApplier {
 enum WarmthApplication {
     Set { kelvin: KelvinTemperature },
     Ramp { target: KelvinTemperature, duration: RampDuration },
+    RampFrom { current: KelvinTemperature, target: KelvinTemperature, duration: RampDuration },
     Interrupt,
 }
 
@@ -658,6 +681,9 @@ impl Message<WarmthApplication> for WarmthApplier {
                 }
                 WarmthApplication::Ramp { target, duration } => {
                     run_warmth_ramp(gamma, active, generation, target, duration).await;
+                }
+                WarmthApplication::RampFrom { current, target, duration } => {
+                    run_warmth_ramp_from(gamma, active, generation, current, target, duration).await;
                 }
                 WarmthApplication::Interrupt => {}
             }
@@ -694,6 +720,7 @@ impl Actor for BrightnessApplier {
 enum BrightnessApplication {
     Set { percent: BrightnessPercent },
     Ramp { target: BrightnessPercent, duration: RampDuration },
+    RampFrom { current: BrightnessPercent, target: BrightnessPercent, duration: RampDuration },
     Interrupt,
 }
 
@@ -720,6 +747,9 @@ impl Message<BrightnessApplication> for BrightnessApplier {
                 BrightnessApplication::Ramp { target, duration } => {
                     run_brightness_ramp(gamma, active, generation, target, duration).await;
                 }
+                BrightnessApplication::RampFrom { current, target, duration } => {
+                    run_brightness_ramp_from(gamma, active, generation, current, target, duration).await;
+                }
                 BrightnessApplication::Interrupt => {}
             }
         })
@@ -740,6 +770,24 @@ async fn run_warmth_ramp(
             return;
         }
     };
+    run_warmth_ramp_from(gamma, active, generation, from, target, duration).await;
+}
+
+async fn run_warmth_ramp_from(
+    gamma: GammaClient,
+    active: Arc<AtomicU64>,
+    generation: u64,
+    from: KelvinTemperature,
+    target: KelvinTemperature,
+    duration: RampDuration,
+) {
+    if active.load(Ordering::SeqCst) != generation {
+        return;
+    }
+    if let Err(error) = gamma.set_temperature(from).await {
+        eprintln!("chroma-daemon warmth ramp apply error: {error}");
+        return;
+    }
     if from == target {
         return;
     }
@@ -778,6 +826,24 @@ async fn run_brightness_ramp(
             return;
         }
     };
+    run_brightness_ramp_from(gamma, active, generation, from, target, duration).await;
+}
+
+async fn run_brightness_ramp_from(
+    gamma: GammaClient,
+    active: Arc<AtomicU64>,
+    generation: u64,
+    from: BrightnessPercent,
+    target: BrightnessPercent,
+    duration: RampDuration,
+) {
+    if active.load(Ordering::SeqCst) != generation {
+        return;
+    }
+    if let Err(error) = gamma.set_brightness(from).await {
+        eprintln!("chroma-daemon brightness ramp apply error: {error}");
+        return;
+    }
     if from == target {
         return;
     }
@@ -872,7 +938,7 @@ impl ScheduleEngine {
     async fn reconcile(&mut self, generation: u64, context: &mut Context<Self, ()>) {
         let now = Local::now();
         let plan = SchedulePlan::from_config(&self.config, self.location, now);
-        if let Err(error) = self.root.tell(ApplyScheduledState { values: plan.values }).await {
+        if let Err(error) = self.root.tell(ApplyScheduledState { values: plan.values() }).await {
             eprintln!("chroma-daemon schedule enqueue error: {error}");
         }
         if let Some(next) = plan.next_delay_from(now) {
@@ -1013,202 +1079,6 @@ impl Message<LocationRefreshCompleted> for ScheduleEngine {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ScheduledValues {
-    theme: Option<ThemeMode>,
-    warmth: Option<ScheduledWarmth>,
-    brightness: Option<ScheduledBrightness>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ScheduledWarmth {
-    kelvin: KelvinTemperature,
-    ramp_duration: Option<RampDuration>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ScheduledBrightness {
-    percent: BrightnessPercent,
-    ramp_duration: Option<RampDuration>,
-}
-
-struct SchedulePlan {
-    values: ScheduledValues,
-    next_at: Option<DateTime<Local>>,
-}
-
-impl SchedulePlan {
-    fn from_config(config: &Config, location: Option<Location>, now: DateTime<Local>) -> Self {
-        let theme = scheduled_theme(&config.theme.schedule, location, now);
-        let warmth = scheduled_warmth(&config.warmth.schedule, location, now);
-        let brightness = scheduled_brightness(&config.brightness.schedule, location, now);
-        Self {
-            values: ScheduledValues { theme: theme.value, warmth: warmth.value, brightness: brightness.value },
-            next_at: [theme.next_at, warmth.next_at, brightness.next_at].into_iter().flatten().min(),
-        }
-    }
-
-    fn next_delay_from(&self, now: DateTime<Local>) -> Option<Duration> {
-        let next = self.next_at?;
-        next.signed_duration_since(now).to_std().ok().map(|duration| duration.max(Duration::from_secs(1)))
-    }
-}
-
-struct AxisSchedule<T> {
-    value: Option<T>,
-    next_at: Option<DateTime<Local>>,
-}
-
-impl<T> AxisSchedule<T> {
-    fn ready(value: T, next_at: Option<DateTime<Local>>) -> Self {
-        Self { value: Some(value), next_at }
-    }
-
-    fn waiting() -> Self {
-        Self { value: None, next_at: None }
-    }
-}
-
-fn scheduled_theme(
-    schedule: &ThemeSchedule,
-    location: Option<Location>,
-    now: DateTime<Local>,
-) -> AxisSchedule<ThemeMode> {
-    match schedule {
-        ThemeSchedule::Manual(mode) => AxisSchedule::ready(*mode, None),
-        ThemeSchedule::Scheduled { waypoints, default } => {
-            if schedule.needs_geolocation() && location.is_none() {
-                return AxisSchedule::waiting();
-            }
-            let events = waypoints.iter().flat_map(|waypoint| {
-                trigger_datetimes(waypoint.trigger, location, now).map(move |time| (time, waypoint.mode))
-            });
-            current_value(events, *default, now)
-        }
-    }
-}
-
-fn scheduled_warmth(
-    schedule: &WarmthSchedule,
-    location: Option<Location>,
-    now: DateTime<Local>,
-) -> AxisSchedule<ScheduledWarmth> {
-    match schedule {
-        WarmthSchedule::Manual(level) => {
-            AxisSchedule::ready(ScheduledWarmth { kelvin: level.kelvin(), ramp_duration: None }, None)
-        }
-        WarmthSchedule::Scheduled { waypoints, default } => {
-            if schedule.needs_geolocation() && location.is_none() {
-                return AxisSchedule::waiting();
-            }
-            let events = waypoints.iter().flat_map(|waypoint| {
-                trigger_datetimes(waypoint.trigger, location, now).map(move |time| {
-                    (
-                        time,
-                        ScheduledWarmth {
-                            kelvin: waypoint.target.kelvin(),
-                            ramp_duration: Some(waypoint.ramp_duration),
-                        },
-                    )
-                })
-            });
-            current_value(events, ScheduledWarmth { kelvin: default.kelvin(), ramp_duration: None }, now)
-        }
-    }
-}
-
-fn scheduled_brightness(
-    schedule: &BrightnessSchedule,
-    location: Option<Location>,
-    now: DateTime<Local>,
-) -> AxisSchedule<ScheduledBrightness> {
-    match schedule {
-        BrightnessSchedule::Manual(level) => {
-            AxisSchedule::ready(ScheduledBrightness { percent: level.percent(), ramp_duration: None }, None)
-        }
-        BrightnessSchedule::Scheduled { waypoints, default } => {
-            if schedule.needs_geolocation() && location.is_none() {
-                return AxisSchedule::waiting();
-            }
-            let events = waypoints.iter().flat_map(|waypoint| {
-                trigger_datetimes(waypoint.trigger, location, now).map(move |time| {
-                    (
-                        time,
-                        ScheduledBrightness {
-                            percent: waypoint.target.percent(),
-                            ramp_duration: Some(waypoint.ramp_duration),
-                        },
-                    )
-                })
-            });
-            current_value(events, ScheduledBrightness { percent: default.percent(), ramp_duration: None }, now)
-        }
-    }
-}
-
-fn current_value<T>(
-    events: impl IntoIterator<Item = (DateTime<Local>, T)>,
-    default: T,
-    now: DateTime<Local>,
-) -> AxisSchedule<T>
-where
-    T: Copy,
-{
-    let mut current = default;
-    let mut current_at = None;
-    let mut next_at = None;
-    for (time, value) in events {
-        if time <= now && current_at.is_none_or(|at| time > at) {
-            current = value;
-            current_at = Some(time);
-        } else if time > now && next_at.is_none_or(|at| time < at) {
-            next_at = Some(time);
-        }
-    }
-    AxisSchedule::ready(current, next_at)
-}
-
-fn trigger_datetimes(
-    trigger: RampTrigger,
-    location: Option<Location>,
-    now: DateTime<Local>,
-) -> impl Iterator<Item = DateTime<Local>> {
-    [-1_i64, 0, 1]
-        .into_iter()
-        .filter_map(move |offset| now.date_naive().checked_add_signed(chrono::Duration::days(offset)))
-        .filter_map(move |date| trigger_datetime(trigger, location, date))
-}
-
-fn trigger_datetime(trigger: RampTrigger, location: Option<Location>, date: NaiveDate) -> Option<DateTime<Local>> {
-    match trigger {
-        RampTrigger::TimeOfDay(hour, minute) => local_time_on(date, hour, minute),
-        RampTrigger::CivilDawn(offset) => civil_time_on(date, location?, SolarEvent::Dawn(DawnType::Civil), offset),
-        RampTrigger::CivilDusk(offset) => civil_time_on(date, location?, SolarEvent::Dusk(DawnType::Civil), offset),
-    }
-}
-
-fn local_time_on(date: NaiveDate, hour: LocalHour, minute: LocalMinute) -> Option<DateTime<Local>> {
-    let naive = date.and_hms_opt(hour.as_u8() as u32, minute.as_u8() as u32, 0)?;
-    match Local.from_local_datetime(&naive) {
-        LocalResult::Single(datetime) => Some(datetime),
-        LocalResult::Ambiguous(first, _) => Some(first),
-        LocalResult::None => None,
-    }
-}
-
-fn civil_time_on(
-    date: NaiveDate,
-    location: Location,
-    event: SolarEvent,
-    offset: SignedMinutes,
-) -> Option<DateTime<Local>> {
-    let coordinates = Coordinates::new(location.latitude, location.longitude)?;
-    let utc = SolarDay::new(coordinates, date).event_time(event)?;
-    Some(utc.with_timezone(&Local) + chrono::Duration::minutes(offset.as_i16() as i64))
-}
-
-type Location = StoredLocation;
-
 struct GeoclueLocator;
 
 impl GeoclueLocator {
@@ -1244,68 +1114,5 @@ impl GeoclueLocator {
         let longitude: f64 = location.get_property("Longitude").await?;
         let _: std::result::Result<(), zbus::Error> = client.call("Stop", &()).await;
         Ok(Location { latitude, longitude })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::brightness::{BrightnessLevel, BrightnessSchedule};
-    use crate::warmth::{WarmthLevel, WarmthWaypoint};
-
-    fn fixed_now() -> DateTime<Local> {
-        Local.with_ymd_and_hms(2026, 5, 12, 12, 0, 0).single().expect("fixed local noon is valid")
-    }
-
-    #[test]
-    fn civil_warmth_axis_waits_without_location_instead_of_applying_default() {
-        let schedule = WarmthSchedule::Scheduled {
-            waypoints: vec![
-                WarmthWaypoint {
-                    trigger: RampTrigger::CivilDawn(SignedMinutes::new(-30)),
-                    target: WarmthLevel::Cold,
-                    ramp_duration: RampDuration::from_minutes(30),
-                },
-                WarmthWaypoint {
-                    trigger: RampTrigger::CivilDusk(SignedMinutes::new(-60)),
-                    target: WarmthLevel::Warmest,
-                    ramp_duration: RampDuration::from_minutes(60),
-                },
-            ],
-            default: WarmthLevel::Neutral,
-        };
-
-        let axis = scheduled_warmth(&schedule, None, fixed_now());
-
-        assert!(axis.value.is_none());
-        assert!(axis.next_at.is_none());
-    }
-
-    #[test]
-    fn manual_brightness_axis_still_applies_without_location() {
-        let axis = scheduled_brightness(&BrightnessSchedule::Manual(BrightnessLevel::Bright), None, fixed_now());
-
-        assert_eq!(
-            axis.value.expect("manual schedules do not wait for location").percent,
-            BrightnessLevel::Bright.percent()
-        );
-        assert!(axis.next_at.is_none());
-    }
-
-    #[test]
-    fn civil_warmth_axis_applies_once_location_is_known() {
-        let schedule = WarmthSchedule::Scheduled {
-            waypoints: vec![WarmthWaypoint {
-                trigger: RampTrigger::CivilDawn(SignedMinutes::new(0)),
-                target: WarmthLevel::Cold,
-                ramp_duration: RampDuration::from_minutes(30),
-            }],
-            default: WarmthLevel::Neutral,
-        };
-        let location = Location { latitude: 41.3275, longitude: 19.8189 };
-
-        let axis = scheduled_warmth(&schedule, Some(location), fixed_now());
-
-        assert!(axis.value.is_some());
     }
 }

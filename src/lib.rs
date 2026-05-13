@@ -19,6 +19,7 @@ pub mod error;
 pub mod gamma;
 pub mod request;
 pub mod response;
+pub mod schedule;
 pub mod state;
 pub mod theme;
 pub mod time;
@@ -30,6 +31,7 @@ pub use config::{Config, ConfigFile};
 pub use error::{Error, Result};
 pub use request::Request;
 pub use response::Response;
+pub use schedule::{Location, SchedulePlan, ScheduledBrightness, ScheduledValues, ScheduledWarmth};
 pub use state::{
     ReadStoredLocation, ReadStoredState, RecordBrightness, RecordLocation, RecordTheme, RecordWarmth, StateStore,
     StoredLocation, StoredVisualState,

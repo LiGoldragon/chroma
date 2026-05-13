@@ -130,17 +130,31 @@ fn hc_chroma_015_resume_location_refresh_is_separate_from_time_reconcile() {
 #[test]
 fn hc_chroma_016_startup_reapplies_state_and_civil_axes_wait_for_location() {
     let daemon_source = include_str!("../src/daemon.rs");
+    let schedule_source = include_str!("../src/schedule.rs");
     let state_source = include_str!("../src/state.rs");
 
     assert!(daemon_source.contains("struct ReapplyCurrentState"));
     assert!(daemon_source.contains("root.ask(ReapplyCurrentState)"));
-    assert!(daemon_source.contains("theme: Option<ThemeMode>"));
-    assert!(daemon_source.contains("warmth: Option<ScheduledWarmth>"));
-    assert!(daemon_source.contains("brightness: Option<ScheduledBrightness>"));
-    assert!(daemon_source.contains("fn waiting() -> Self"));
-    assert!(daemon_source.contains("schedule.needs_geolocation() && location.is_none()"));
+    assert!(schedule_source.contains("theme: Option<ThemeMode>"));
+    assert!(schedule_source.contains("warmth: Option<ScheduledWarmth>"));
+    assert!(schedule_source.contains("brightness: Option<ScheduledBrightness>"));
+    assert!(schedule_source.contains("fn waiting() -> Self"));
+    assert!(schedule_source.contains("self.schedule.needs_geolocation() && self.location.is_none()"));
     assert!(state_source.contains("struct StoredLocation"));
     assert!(state_source.contains("const LOCATION_TABLE"));
     assert!(state_source.contains("struct RecordLocation"));
     assert!(state_source.contains("struct ReadStoredLocation"));
+}
+
+#[test]
+fn hc_chroma_017_schedule_projects_elapsed_ramp_time() {
+    let schedule_source = include_str!("../src/schedule.rs");
+    let daemon_source = include_str!("../src/daemon.rs");
+
+    assert!(schedule_source.contains("Wall-clock schedule projection"));
+    assert!(schedule_source.contains("RampedScheduleState::Transition"));
+    assert!(schedule_source.contains("remaining_duration_at"));
+    assert!(schedule_source.contains("interpolate_toward"));
+    assert!(daemon_source.contains("WarmthApplication::RampFrom"));
+    assert!(daemon_source.contains("BrightnessApplication::RampFrom"));
 }

@@ -1,10 +1,12 @@
 //! Tests for axis schedules and the top-level `Config`.
 
 use chroma::{
-    BrightnessAxis, BrightnessLevel, BrightnessSchedule, BrightnessWaypoint, Config, LocalHour, LocalMinute,
-    RampDuration, RampTrigger, SignedMinutes, ThemeAdapters, ThemeAxis, ThemeConcern, ThemeMode, ThemePalette,
-    ThemePalettes, ThemeSchedule, ThemeWaypoint, WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint,
+    BrightnessAxis, BrightnessLevel, BrightnessSchedule, BrightnessWaypoint, Config, LocalHour, LocalMinute, Location,
+    RampDuration, RampTrigger, SchedulePlan, ScheduledBrightness, ScheduledWarmth, SignedMinutes, ThemeAdapters,
+    ThemeAxis, ThemeConcern, ThemeMode, ThemePalette, ThemePalettes, ThemeSchedule, ThemeWaypoint, WarmthAxis,
+    WarmthLevel, WarmthSchedule, WarmthWaypoint,
 };
+use chrono::{Local, TimeZone};
 
 fn dawn(offset: i16) -> RampTrigger {
     RampTrigger::CivilDawn(SignedMinutes::new(offset))
@@ -34,6 +36,18 @@ fn test_theme_axis(schedule: ThemeSchedule) -> ThemeAxis {
         font_point_size: 12,
         ghostty_config_templates: None,
         schedule,
+    }
+}
+
+fn local_time(hour: u32, minute: u32) -> chrono::DateTime<Local> {
+    Local.with_ymd_and_hms(2026, 5, 12, hour, minute, 0).single().expect("test local time is valid")
+}
+
+fn config_with_schedules(warmth: WarmthSchedule, brightness: BrightnessSchedule) -> Config {
+    Config {
+        theme: test_theme_axis(ThemeSchedule::Manual(ThemeMode::Light)),
+        warmth: WarmthAxis { schedule: warmth },
+        brightness: BrightnessAxis { schedule: brightness },
     }
 }
 
@@ -145,4 +159,148 @@ fn config_without_civil_triggers_does_not_need_geolocation() {
         brightness: BrightnessAxis { schedule: BrightnessSchedule::Manual(BrightnessLevel::Bright) },
     };
     assert!(!config.needs_geolocation());
+}
+
+#[test]
+fn civil_warmth_axis_waits_without_location_instead_of_applying_default() {
+    let config = config_with_schedules(
+        WarmthSchedule::Scheduled {
+            waypoints: vec![
+                WarmthWaypoint {
+                    trigger: dawn(-30),
+                    target: WarmthLevel::Cold,
+                    ramp_duration: RampDuration::from_minutes(30),
+                },
+                WarmthWaypoint {
+                    trigger: dusk(-60),
+                    target: WarmthLevel::Warmest,
+                    ramp_duration: RampDuration::from_minutes(60),
+                },
+            ],
+            default: WarmthLevel::Neutral,
+        },
+        BrightnessSchedule::Manual(BrightnessLevel::Bright),
+    );
+
+    let values = SchedulePlan::from_config(&config, None, local_time(12, 0)).values();
+
+    assert!(values.warmth().is_none());
+    assert_eq!(
+        values.brightness().unwrap(),
+        ScheduledBrightness::Settled { percent: BrightnessLevel::Bright.percent() }
+    );
+}
+
+#[test]
+fn civil_warmth_axis_applies_once_location_is_known() {
+    let config = config_with_schedules(
+        WarmthSchedule::Scheduled {
+            waypoints: vec![WarmthWaypoint {
+                trigger: dawn(0),
+                target: WarmthLevel::Cold,
+                ramp_duration: RampDuration::from_minutes(30),
+            }],
+            default: WarmthLevel::Neutral,
+        },
+        BrightnessSchedule::Manual(BrightnessLevel::Bright),
+    );
+    let tirana = Location { latitude: 41.3275, longitude: 19.8189 };
+
+    let values = SchedulePlan::from_config(&config, Some(tirana), local_time(12, 0)).values();
+
+    assert!(values.warmth().is_some());
+}
+
+#[test]
+fn warmth_schedule_after_finished_ramp_is_settled_target() {
+    let config = config_with_schedules(
+        WarmthSchedule::Scheduled {
+            waypoints: vec![
+                WarmthWaypoint {
+                    trigger: at(5, 0),
+                    target: WarmthLevel::Warmest,
+                    ramp_duration: RampDuration::from_seconds(1),
+                },
+                WarmthWaypoint {
+                    trigger: at(6, 0),
+                    target: WarmthLevel::Cold,
+                    ramp_duration: RampDuration::from_minutes(30),
+                },
+            ],
+            default: WarmthLevel::Warmest,
+        },
+        BrightnessSchedule::Manual(BrightnessLevel::Bright),
+    );
+
+    let values = SchedulePlan::from_config(&config, None, local_time(10, 30)).values();
+
+    assert_eq!(values.warmth().unwrap(), ScheduledWarmth::Settled { kelvin: WarmthLevel::Cold.kelvin() });
+}
+
+#[test]
+fn warmth_schedule_inside_ramp_projects_elapsed_position() {
+    let config = config_with_schedules(
+        WarmthSchedule::Scheduled {
+            waypoints: vec![
+                WarmthWaypoint {
+                    trigger: at(5, 0),
+                    target: WarmthLevel::Warmest,
+                    ramp_duration: RampDuration::from_seconds(1),
+                },
+                WarmthWaypoint {
+                    trigger: at(6, 0),
+                    target: WarmthLevel::Cold,
+                    ramp_duration: RampDuration::from_minutes(30),
+                },
+            ],
+            default: WarmthLevel::Warmest,
+        },
+        BrightnessSchedule::Manual(BrightnessLevel::Bright),
+    );
+    let expected_current = WarmthLevel::Warmest.kelvin().lerp_to(WarmthLevel::Cold.kelvin(), 0.5);
+
+    let values = SchedulePlan::from_config(&config, None, local_time(6, 15)).values();
+
+    assert_eq!(
+        values.warmth().unwrap(),
+        ScheduledWarmth::Transition {
+            current_kelvin: expected_current,
+            target_kelvin: WarmthLevel::Cold.kelvin(),
+            remaining_duration: RampDuration::from_minutes(15),
+        }
+    );
+}
+
+#[test]
+fn brightness_schedule_inside_ramp_projects_elapsed_position() {
+    let config = config_with_schedules(
+        WarmthSchedule::Manual(WarmthLevel::Cold),
+        BrightnessSchedule::Scheduled {
+            waypoints: vec![
+                BrightnessWaypoint {
+                    trigger: at(9, 0),
+                    target: BrightnessLevel::Dim,
+                    ramp_duration: RampDuration::from_seconds(1),
+                },
+                BrightnessWaypoint {
+                    trigger: at(10, 0),
+                    target: BrightnessLevel::Bright,
+                    ramp_duration: RampDuration::from_minutes(60),
+                },
+            ],
+            default: BrightnessLevel::Dim,
+        },
+    );
+    let expected_current = BrightnessLevel::Dim.percent().lerp_to(BrightnessLevel::Bright.percent(), 0.5);
+
+    let values = SchedulePlan::from_config(&config, None, local_time(10, 30)).values();
+
+    assert_eq!(
+        values.brightness().unwrap(),
+        ScheduledBrightness::Transition {
+            current_percent: expected_current,
+            target_percent: BrightnessLevel::Bright.percent(),
+            remaining_duration: RampDuration::from_minutes(30),
+        }
+    );
 }
