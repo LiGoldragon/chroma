@@ -8,10 +8,8 @@ persisted state. The daemon replaces darkman, the
 `brightness` shell wrappers, and the `mkApplyScript`
 orchestration that lives in `CriomOS-home` today.
 
-The full design and motivation is in
-`~/primary/reports/system-specialist/28-chroma-unified-visual-daemon.md`.
 This file describes what the system **is** today (the shape that
-ships); the report describes the trade-offs and alternatives.
+ships).
 
 ## Capability boundary
 
@@ -243,5 +241,3 @@ while preserving unrelated mutable user settings.
 - wallpaper as a fourth axis
 - migration of CLI ↔ daemon transport off rkyv-on-UDS (Persona
   fabric is the future host)
-
-See the design report for the rationale behind each.
