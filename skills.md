@@ -20,12 +20,6 @@ by coupling of decisions. They share infrastructure (one config,
 one redb, one bounded geoclue location read path, one CLI, one
 socket); their scheduled events do not share fires.
 
-The design context lives in
-`~/primary/reports/system-specialist/28-chroma-unified-visual-daemon.md`.
-Read it before substantive changes — it carries the
-trade-offs against the alternative (separate `warmth` and
-`darkman` daemons) and the case for unification.
-
 ---
 
 ## Invariants
@@ -133,8 +127,6 @@ If a change touches one of these, the change goes upstream
 
 - `ARCHITECTURE.md` — what the system IS.
 - `AGENTS.md` — the agent contract for this repo.
-- `~/primary/reports/system-specialist/28-chroma-unified-visual-daemon.md`
-  — the design report.
 - `~/primary/skills/rust-discipline.md` — methods on types,
   domain newtypes, errors, actor shape, redb + rkyv.
 - `~/primary/skills/push-not-pull.md` — subscription discipline.

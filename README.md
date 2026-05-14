@@ -27,9 +27,6 @@ state of the display. It applies the existing **Ignis** colour
 scheme from NOTA palette data; Ignis is the palette, Chroma is
 the agent that schedules and applies it.
 
-For the design report, see
-`~/primary/reports/system-specialist/28-chroma-unified-visual-daemon.md`.
-
 For the agent contract, see [`AGENTS.md`](AGENTS.md). For the
 system shape, see [`ARCHITECTURE.md`](ARCHITECTURE.md). For
 project-specific intent and invariants, see
