@@ -11,9 +11,7 @@ NOTA.
 
 It replaces darkman + the `nightshift-*` systemd services + the
 `nightshift` and `brightness` shell wrappers + the
-`mkApplyScript` orchestration in `CriomOS-home`. The design
-report is
-`~/primary/reports/system-specialist/28-chroma-unified-visual-daemon.md`.
+`mkApplyScript` orchestration in `CriomOS-home`.
 
 ## Carve-outs worth knowing
 
@@ -95,8 +93,6 @@ prompts (always `-m '<msg>'`).
 ## See also
 
 - `~/primary/AGENTS.md` — the workspace agent contract.
-- `~/primary/reports/system-specialist/28-chroma-unified-visual-daemon.md`
-  — the design.
 - `~/primary/skills/rust-discipline.md` — Rust style and shape.
 - `~/primary/skills/push-not-pull.md` — subscription discipline.
 - `~/primary/skills/abstractions.md` — verb-belongs-to-noun.
