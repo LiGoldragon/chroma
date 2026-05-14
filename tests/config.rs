@@ -70,6 +70,29 @@ fn config_file_decodes_manual_theme_schedule_from_nota_config() {
 }
 
 #[test]
+fn config_file_decodes_sunrise_sunset_and_relative_solar_offsets() {
+    let fixture = Fixture::new();
+    let config = fixture.write_config(&NATIVE_CONFIG.replace(
+        "(Schedule
+      (Waypoint (CivilDawn (SignedMinutes 0)) Light)
+      (Waypoint (CivilDusk (SignedMinutes 0)) Dark)
+      (Default Dark))",
+        "(Schedule
+      (Waypoint (Sunrise OnTime) Light)
+      (Waypoint (Sunset Early) Dark)
+      (Default Dark))",
+    ));
+
+    let theme = ConfigFile::from_path(config).theme_axis().expect("theme axis decodes");
+
+    let ThemeSchedule::Scheduled { waypoints, .. } = theme.schedule else {
+        panic!("expected scheduled theme");
+    };
+    assert!(matches!(waypoints[0].trigger, RampTrigger::Sunrise(offset) if offset.as_i16() == 0));
+    assert!(matches!(waypoints[1].trigger, RampTrigger::Sunset(offset) if offset.as_i16() == -30));
+}
+
+#[test]
 fn config_file_extracts_full_visual_config_from_nota_config() {
     let fixture = Fixture::new();
     let config = fixture.write_config(NATIVE_CONFIG);

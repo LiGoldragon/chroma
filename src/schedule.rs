@@ -359,8 +359,10 @@ fn trigger_datetimes(
 fn trigger_datetime(trigger: RampTrigger, location: Option<Location>, date: NaiveDate) -> Option<DateTime<Local>> {
     match trigger {
         RampTrigger::TimeOfDay(hour, minute) => local_time_on(date, hour, minute),
-        RampTrigger::CivilDawn(offset) => civil_time_on(date, location?, SolarEvent::Dawn(DawnType::Civil), offset),
-        RampTrigger::CivilDusk(offset) => civil_time_on(date, location?, SolarEvent::Dusk(DawnType::Civil), offset),
+        RampTrigger::Sunrise(offset) => solar_time_on(date, location?, SolarEvent::Sunrise, offset),
+        RampTrigger::Sunset(offset) => solar_time_on(date, location?, SolarEvent::Sunset, offset),
+        RampTrigger::CivilDawn(offset) => solar_time_on(date, location?, SolarEvent::Dawn(DawnType::Civil), offset),
+        RampTrigger::CivilDusk(offset) => solar_time_on(date, location?, SolarEvent::Dusk(DawnType::Civil), offset),
     }
 }
 
@@ -373,7 +375,7 @@ fn local_time_on(date: NaiveDate, hour: LocalHour, minute: LocalMinute) -> Optio
     }
 }
 
-fn civil_time_on(
+fn solar_time_on(
     date: NaiveDate,
     location: Location,
     event: SolarEvent,

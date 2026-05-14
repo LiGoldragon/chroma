@@ -142,11 +142,16 @@ on inotify push. Parses into a typed `Config`:
 ```
 
 Each axis schedule is a list of `Waypoint` records + a `Default`.
-Triggers: `(CivilDawn (SignedMinutes <n>))`,
-`(CivilDusk (SignedMinutes <n>))`, `(TimeOfDay <h> <m>)`.
-The geoclue read runs iff any axis uses a twilight trigger; if
-geolocation is unavailable, the schedule actor retries on a
-bounded delayed message instead of running a polling loop.
+Solar triggers: `(Sunrise <offset>)`, `(Sunset <offset>)`,
+`(CivilDawn <offset>)`, `(CivilDusk <offset>)`. The `<offset>`
+is either exact `(SignedMinutes <n>)` or a readable label:
+`ExtremelyEarly`, `VeryEarly`, `Early`, `OnTime`, `Late`,
+`VeryLate`, `ExtremelyLate`. Early means before the named solar
+event; late means after it. Clock triggers remain
+`(TimeOfDay <h> <m>)`. The geoclue read runs iff any axis uses a
+solar trigger; if geolocation is unavailable, the schedule actor
+retries on a bounded delayed message instead of running a polling
+loop.
 Daemon startup first reapplies the persisted visual state to the
 appliers, then evaluates the schedule. If a civil-trigger axis has
 no held or persisted location yet, that axis is left unchanged

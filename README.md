@@ -9,8 +9,9 @@ wrapper with a single user-service component:
 
 - **Three independent axes** (theme, warmth, brightness), each
   with its own schedule and applier.
-- **Geolocation-driven schedules** via geoclue2 (civil dawn /
-  civil dusk ± offset; per-axis ramp durations).
+- **Geolocation-driven schedules** via geoclue2 (sunrise /
+  sunset / civil twilight, exact or readable early/late offsets,
+  per-axis ramp durations).
 - **Persisted state** in redb + rkyv, crash-consistent across
   resume / login / wake.
 - **One CLI** that takes a single NOTA record on argv —

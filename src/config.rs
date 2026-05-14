@@ -12,7 +12,7 @@ use crate::theme::{
     GhosttyConfigTemplates, ThemeAdapters, ThemeAxis, ThemeConcern, ThemeMode, ThemePalette, ThemePalettes,
     ThemeSchedule, ThemeWaypoint,
 };
-use crate::time::{LocalHour, LocalMinute, RampDuration, RampTrigger, SignedMinutes};
+use crate::time::{LocalHour, LocalMinute, RampDuration, RampTrigger, RelativeSolarOffset, SignedMinutes};
 use crate::warmth::{WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint};
 use nota_codec::{Lexer, Token};
 
@@ -465,8 +465,10 @@ fn parse_trigger(node: &ConfigNode) -> Result<RampTrigger> {
         return Err(Error::Config { message: format!("trigger expected record, got {node:?}") });
     };
     match head.as_str() {
-        "CivilDawn" => Ok(RampTrigger::CivilDawn(parse_signed_minutes(required_record(body, "SignedMinutes")?)?)),
-        "CivilDusk" => Ok(RampTrigger::CivilDusk(parse_signed_minutes(required_record(body, "SignedMinutes")?)?)),
+        "Sunrise" => Ok(RampTrigger::Sunrise(parse_solar_offset(body, "Sunrise")?)),
+        "Sunset" => Ok(RampTrigger::Sunset(parse_solar_offset(body, "Sunset")?)),
+        "CivilDawn" => Ok(RampTrigger::CivilDawn(parse_solar_offset(body, "CivilDawn")?)),
+        "CivilDusk" => Ok(RampTrigger::CivilDusk(parse_solar_offset(body, "CivilDusk")?)),
         "TimeOfDay" => {
             let hour = required_positional(body, 0, "TimeOfDay hour")?.atom_int("TimeOfDay hour")?;
             let minute = required_positional(body, 1, "TimeOfDay minute")?.atom_int("TimeOfDay minute")?;
@@ -477,6 +479,20 @@ fn parse_trigger(node: &ConfigNode) -> Result<RampTrigger> {
         }
         other => Err(Error::Config { message: format!("unknown trigger {other}") }),
     }
+}
+
+fn parse_solar_offset(nodes: &[ConfigNode], label: &str) -> Result<SignedMinutes> {
+    if nodes.is_empty() {
+        return Ok(SignedMinutes::ZERO);
+    }
+    if let Some(signed_minutes) = optional_record(nodes, "SignedMinutes")? {
+        return parse_signed_minutes(signed_minutes);
+    }
+    if nodes.len() == 1 {
+        let name = required_atom(nodes, label)?;
+        return Ok(RelativeSolarOffset::from_config_name(name)?.signed_minutes());
+    }
+    Err(Error::Config { message: format!("{label} expected SignedMinutes or a relative solar offset label") })
 }
 
 fn parse_signed_minutes(nodes: &[ConfigNode]) -> Result<SignedMinutes> {

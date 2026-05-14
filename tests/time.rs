@@ -1,4 +1,4 @@
-use chroma::{LocalHour, LocalMinute, RampDuration, RampTrigger, SignedMinutes};
+use chroma::{LocalHour, LocalMinute, RampDuration, RampTrigger, RelativeSolarOffset, SignedMinutes};
 use core::time::Duration;
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode};
 
@@ -69,6 +69,17 @@ fn signed_minutes_negativity() {
 }
 
 #[test]
+fn relative_solar_offsets_map_to_exact_minutes() {
+    assert_eq!(RelativeSolarOffset::ExtremelyEarly.signed_minutes(), SignedMinutes::new(-120));
+    assert_eq!(RelativeSolarOffset::VeryEarly.signed_minutes(), SignedMinutes::new(-60));
+    assert_eq!(RelativeSolarOffset::Early.signed_minutes(), SignedMinutes::new(-30));
+    assert_eq!(RelativeSolarOffset::OnTime.signed_minutes(), SignedMinutes::ZERO);
+    assert_eq!(RelativeSolarOffset::Late.signed_minutes(), SignedMinutes::new(30));
+    assert_eq!(RelativeSolarOffset::VeryLate.signed_minutes(), SignedMinutes::new(60));
+    assert_eq!(RelativeSolarOffset::ExtremelyLate.signed_minutes(), SignedMinutes::new(120));
+}
+
+#[test]
 fn local_hour_clamps() {
     assert_eq!(LocalHour::new(0).as_u8(), 0);
     assert_eq!(LocalHour::new(23).as_u8(), 23);
@@ -105,8 +116,20 @@ fn civil_dawn_requires_geolocation() {
 }
 
 #[test]
+fn sunrise_requires_geolocation() {
+    let trigger = RampTrigger::Sunrise(SignedMinutes::new(-30));
+    assert!(trigger.requires_geolocation());
+}
+
+#[test]
 fn civil_dusk_requires_geolocation() {
     let trigger = RampTrigger::CivilDusk(SignedMinutes::new(60));
+    assert!(trigger.requires_geolocation());
+}
+
+#[test]
+fn sunset_requires_geolocation() {
+    let trigger = RampTrigger::Sunset(SignedMinutes::new(60));
     assert!(trigger.requires_geolocation());
 }
 
@@ -118,6 +141,8 @@ fn time_of_day_does_not_require_geolocation() {
 
 #[test]
 fn ramp_trigger_display() {
+    assert_eq!(format!("{}", RampTrigger::Sunrise(SignedMinutes::new(-30))), "sunrise -30m");
+    assert_eq!(format!("{}", RampTrigger::Sunset(SignedMinutes::new(60))), "sunset +60m");
     assert_eq!(format!("{}", RampTrigger::CivilDawn(SignedMinutes::new(-30))), "civil-dawn -30m");
     assert_eq!(format!("{}", RampTrigger::CivilDusk(SignedMinutes::new(60))), "civil-dusk +60m");
     assert_eq!(format!("{}", RampTrigger::TimeOfDay(LocalHour::new(7), LocalMinute::new(30))), "07:30");

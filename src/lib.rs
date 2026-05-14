@@ -40,5 +40,5 @@ pub use theme::{
     GhosttyConfigTemplates, ThemeAdapters, ThemeApplier, ThemeAxis, ThemeConcern, ThemeMode, ThemePalette,
     ThemePalettes, ThemeSchedule, ThemeWaypoint,
 };
-pub use time::{LocalHour, LocalMinute, RampDuration, RampTrigger, SignedMinutes};
+pub use time::{LocalHour, LocalMinute, RampDuration, RampTrigger, RelativeSolarOffset, SignedMinutes};
 pub use warmth::{KelvinTemperature, WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint};

@@ -143,3 +143,17 @@ Tests:
 - `warmth_schedule_after_finished_ramp_is_settled_target`
 - `warmth_schedule_inside_ramp_projects_elapsed_position`
 - `brightness_schedule_inside_ramp_projects_elapsed_position`
+
+## HC-CHROMA-014 — Theme Schedule Uses Geolocated Solar Events
+
+Theme waypoints may target sunrise, sunset, civil dawn, or civil dusk.
+Those triggers resolve through the held GeoClue location and the solar
+calculator; they are not fixed wall-clock guesses. Human-readable
+early/late labels are configuration sugar for exact signed-minute offsets
+relative to the named solar event.
+
+Tests:
+
+- `theme_sunset_early_projects_from_location_solar_time`
+- `theme_sunrise_on_time_projects_from_location_solar_time`
+- `config_file_decodes_sunrise_sunset_and_relative_solar_offsets`

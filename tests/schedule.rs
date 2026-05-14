@@ -7,6 +7,7 @@ use chroma::{
     WarmthLevel, WarmthSchedule, WarmthWaypoint,
 };
 use chrono::{Local, TimeZone};
+use sunrise::{Coordinates, SolarDay, SolarEvent};
 
 fn dawn(offset: i16) -> RampTrigger {
     RampTrigger::CivilDawn(SignedMinutes::new(offset))
@@ -14,6 +15,14 @@ fn dawn(offset: i16) -> RampTrigger {
 
 fn dusk(offset: i16) -> RampTrigger {
     RampTrigger::CivilDusk(SignedMinutes::new(offset))
+}
+
+fn sunrise(offset: i16) -> RampTrigger {
+    RampTrigger::Sunrise(SignedMinutes::new(offset))
+}
+
+fn sunset(offset: i16) -> RampTrigger {
+    RampTrigger::Sunset(SignedMinutes::new(offset))
 }
 
 fn at(hour: u8, minute: u8) -> RampTrigger {
@@ -41,6 +50,16 @@ fn test_theme_axis(schedule: ThemeSchedule) -> ThemeAxis {
 
 fn local_time(hour: u32, minute: u32) -> chrono::DateTime<Local> {
     Local.with_ymd_and_hms(2026, 5, 12, hour, minute, 0).single().expect("test local time is valid")
+}
+
+fn saranda() -> Location {
+    Location { latitude: 39.8753, longitude: 20.0059 }
+}
+
+fn saranda_solar_event(event: SolarEvent) -> chrono::DateTime<Local> {
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 5, 14).expect("valid date");
+    let coordinates = Coordinates::new(saranda().latitude, saranda().longitude).expect("valid coordinates");
+    SolarDay::new(coordinates, date).event_time(event).expect("solar event exists").with_timezone(&Local)
 }
 
 fn config_with_schedules(warmth: WarmthSchedule, brightness: BrightnessSchedule) -> Config {
@@ -91,6 +110,24 @@ fn theme_scheduled_with_civil_trigger_needs_geolocation() {
             ThemeWaypoint { trigger: dusk(0), mode: ThemeMode::Dark },
         ],
         default: ThemeMode::Dark,
+    };
+    assert!(schedule.needs_geolocation());
+}
+
+#[test]
+fn theme_scheduled_with_sunrise_trigger_needs_geolocation() {
+    let schedule = ThemeSchedule::Scheduled {
+        waypoints: vec![ThemeWaypoint { trigger: sunrise(0), mode: ThemeMode::Light }],
+        default: ThemeMode::Dark,
+    };
+    assert!(schedule.needs_geolocation());
+}
+
+#[test]
+fn theme_scheduled_with_sunset_trigger_needs_geolocation() {
+    let schedule = ThemeSchedule::Scheduled {
+        waypoints: vec![ThemeWaypoint { trigger: sunset(0), mode: ThemeMode::Dark }],
+        default: ThemeMode::Light,
     };
     assert!(schedule.needs_geolocation());
 }
@@ -159,6 +196,54 @@ fn config_without_civil_triggers_does_not_need_geolocation() {
         brightness: BrightnessAxis { schedule: BrightnessSchedule::Manual(BrightnessLevel::Bright) },
     };
     assert!(!config.needs_geolocation());
+}
+
+#[test]
+fn theme_sunset_early_projects_from_location_solar_time() {
+    let sunset_time = saranda_solar_event(SolarEvent::Sunset);
+    let config = Config {
+        theme: test_theme_axis(ThemeSchedule::Scheduled {
+            waypoints: vec![
+                ThemeWaypoint { trigger: sunrise(0), mode: ThemeMode::Light },
+                ThemeWaypoint { trigger: sunset(-30), mode: ThemeMode::Dark },
+            ],
+            default: ThemeMode::Dark,
+        }),
+        warmth: WarmthAxis { schedule: WarmthSchedule::Manual(WarmthLevel::Neutral) },
+        brightness: BrightnessAxis { schedule: BrightnessSchedule::Manual(BrightnessLevel::Bright) },
+    };
+
+    let before =
+        SchedulePlan::from_config(&config, Some(saranda()), sunset_time - chrono::Duration::minutes(31)).values();
+    let after =
+        SchedulePlan::from_config(&config, Some(saranda()), sunset_time - chrono::Duration::minutes(29)).values();
+
+    assert_eq!(before.theme().unwrap(), ThemeMode::Light);
+    assert_eq!(after.theme().unwrap(), ThemeMode::Dark);
+}
+
+#[test]
+fn theme_sunrise_on_time_projects_from_location_solar_time() {
+    let sunrise_time = saranda_solar_event(SolarEvent::Sunrise);
+    let config = Config {
+        theme: test_theme_axis(ThemeSchedule::Scheduled {
+            waypoints: vec![
+                ThemeWaypoint { trigger: sunset(0), mode: ThemeMode::Dark },
+                ThemeWaypoint { trigger: RampTrigger::Sunrise(SignedMinutes::ZERO), mode: ThemeMode::Light },
+            ],
+            default: ThemeMode::Dark,
+        }),
+        warmth: WarmthAxis { schedule: WarmthSchedule::Manual(WarmthLevel::Neutral) },
+        brightness: BrightnessAxis { schedule: BrightnessSchedule::Manual(BrightnessLevel::Bright) },
+    };
+
+    let before =
+        SchedulePlan::from_config(&config, Some(saranda()), sunrise_time - chrono::Duration::minutes(1)).values();
+    let after =
+        SchedulePlan::from_config(&config, Some(saranda()), sunrise_time + chrono::Duration::minutes(1)).values();
+
+    assert_eq!(before.theme().unwrap(), ThemeMode::Dark);
+    assert_eq!(after.theme().unwrap(), ThemeMode::Light);
 }
 
 #[test]

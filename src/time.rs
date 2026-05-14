@@ -9,6 +9,7 @@
 use core::fmt;
 use core::time::Duration;
 
+use crate::error::{Error, Result};
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
@@ -149,6 +150,51 @@ impl Default for SignedMinutes {
     }
 }
 
+/// A human-readable offset relative to a solar event.
+///
+/// Exact minute offsets remain available through [`SignedMinutes`].
+/// These labels are the configuration vocabulary for common choices:
+/// "early" means before the named event, "late" means after it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RelativeSolarOffset {
+    ExtremelyEarly,
+    VeryEarly,
+    Early,
+    OnTime,
+    Late,
+    VeryLate,
+    ExtremelyLate,
+}
+
+impl RelativeSolarOffset {
+    /// Decode the NOTA label used in the Chroma config.
+    pub fn from_config_name(name: &str) -> Result<Self> {
+        match name {
+            "ExtremelyEarly" => Ok(Self::ExtremelyEarly),
+            "VeryEarly" => Ok(Self::VeryEarly),
+            "Early" => Ok(Self::Early),
+            "OnTime" => Ok(Self::OnTime),
+            "Late" => Ok(Self::Late),
+            "VeryLate" => Ok(Self::VeryLate),
+            "ExtremelyLate" => Ok(Self::ExtremelyLate),
+            other => Err(Error::Config { message: format!("unknown solar offset label {other:?}") }),
+        }
+    }
+
+    /// The exact minute offset represented by the label.
+    pub const fn signed_minutes(self) -> SignedMinutes {
+        match self {
+            Self::ExtremelyEarly => SignedMinutes::new(-120),
+            Self::VeryEarly => SignedMinutes::new(-60),
+            Self::Early => SignedMinutes::new(-30),
+            Self::OnTime => SignedMinutes::ZERO,
+            Self::Late => SignedMinutes::new(30),
+            Self::VeryLate => SignedMinutes::new(60),
+            Self::ExtremelyLate => SignedMinutes::new(120),
+        }
+    }
+}
+
 /// A wall-clock hour, `[0, 23]` (clamped at construction).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LocalHour(u8);
@@ -203,11 +249,14 @@ impl fmt::Display for LocalMinute {
 
 /// When in the day a waypoint fires.
 ///
-/// `CivilDawn` and `CivilDusk` resolve to absolute times only
-/// once a geolocation is known. `TimeOfDay` resolves directly
-/// against the wall clock.
+/// Solar triggers resolve to absolute times only once a geolocation
+/// is known. `TimeOfDay` resolves directly against the wall clock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RampTrigger {
+    /// Sunrise plus the offset.
+    Sunrise(SignedMinutes),
+    /// Sunset plus the offset.
+    Sunset(SignedMinutes),
     /// Civil dawn (sun 6° below horizon at sunrise) plus the offset.
     CivilDawn(SignedMinutes),
     /// Civil dusk (sun 6° below horizon at sunset) plus the offset.
@@ -219,13 +268,18 @@ pub enum RampTrigger {
 impl RampTrigger {
     /// Whether this trigger needs a geolocation to resolve.
     pub const fn requires_geolocation(self) -> bool {
-        matches!(self, RampTrigger::CivilDawn(_) | RampTrigger::CivilDusk(_))
+        matches!(
+            self,
+            RampTrigger::Sunrise(_) | RampTrigger::Sunset(_) | RampTrigger::CivilDawn(_) | RampTrigger::CivilDusk(_)
+        )
     }
 }
 
 impl fmt::Display for RampTrigger {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            RampTrigger::Sunrise(offset) => write!(formatter, "sunrise {offset}"),
+            RampTrigger::Sunset(offset) => write!(formatter, "sunset {offset}"),
             RampTrigger::CivilDawn(offset) => write!(formatter, "civil-dawn {offset}"),
             RampTrigger::CivilDusk(offset) => write!(formatter, "civil-dusk {offset}"),
             RampTrigger::TimeOfDay(hour, minute) => write!(formatter, "{hour}:{minute}"),
