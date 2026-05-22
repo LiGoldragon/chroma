@@ -95,7 +95,7 @@ impl NotaDecode for RampDuration {
                 decoder.expect_record_end()?;
                 Ok(Self::from_seconds(seconds))
             }
-            other => Err(nota_codec::Error::UnknownKindForVerb { verb: "RampDuration", got: other.to_string() }),
+            other => Err(nota_codec::Error::UnknownVariant { enum_name: "RampDuration", got: other.to_string() }),
         }
     }
 }
