@@ -89,12 +89,13 @@ impl<'input> ConfigText<'input> {
 
     fn config(&self) -> Result<Config> {
         self.reject_removed_or_non_nota_inputs()?;
-        let document = ConfigDocument::parse(self.text)?;
+        let document = ConfigDocument::parse(&config_text_with_bracket_strings_as_quoted(self.text)?)?;
         document.config()
     }
 
     fn reject_removed_or_non_nota_inputs(&self) -> Result<()> {
-        let mut lexer = Lexer::new(self.text);
+        let text = config_text_with_bracket_strings_as_quoted(self.text)?;
+        let mut lexer = Lexer::new(&text);
         while let Some(token) = lexer.next_token()? {
             match token {
                 Token::Ident(value) | Token::Str(value) => {
@@ -113,6 +114,157 @@ impl<'input> ConfigText<'input> {
         }
         Ok(())
     }
+}
+
+fn config_text_with_bracket_strings_as_quoted(text: &str) -> Result<String> {
+    let mut output = String::with_capacity(text.len());
+    let mut offset = 0;
+    while offset < text.len() {
+        let bytes = text.as_bytes();
+        match bytes[offset] {
+            b'[' if bytes.get(offset + 1) == Some(&b'|') => {
+                offset += 2;
+                let value = read_config_block_string(text, &mut offset)?;
+                push_quoted_string(&mut output, &value);
+            }
+            b'[' => {
+                offset += 1;
+                let value = read_config_bracket_string(text, &mut offset)?;
+                push_quoted_string(&mut output, &value);
+            }
+            b'"' => copy_config_quoted_string(text, &mut offset, &mut output)?,
+            b';' if bytes.get(offset + 1) == Some(&b';') => {
+                copy_config_comment(text, &mut offset, &mut output);
+            }
+            _ => {
+                let character = text[offset..].chars().next().expect("offset is in bounds");
+                output.push(character);
+                offset += character.len_utf8();
+            }
+        }
+    }
+    Ok(output)
+}
+
+fn read_config_bracket_string(text: &str, offset: &mut usize) -> Result<String> {
+    let mut output = String::new();
+    while *offset < text.len() {
+        match text.as_bytes()[*offset] {
+            b']' => {
+                *offset += 1;
+                return Ok(output);
+            }
+            b'\n' => {
+                return Err(Error::Config { message: "newline in bracket string".into() });
+            }
+            b'\\' => {
+                let Some(escape) = text.as_bytes().get(*offset + 1).copied() else {
+                    return Err(Error::Config { message: "unterminated bracket string escape".into() });
+                };
+                let character = match escape {
+                    b'\\' => '\\',
+                    b']' => ']',
+                    b'n' => '\n',
+                    b't' => '\t',
+                    b'r' => '\r',
+                    other => {
+                        return Err(Error::Config {
+                            message: format!("unknown bracket string escape {}", other as char),
+                        });
+                    }
+                };
+                output.push(character);
+                *offset += 2;
+            }
+            _ => {
+                let character = text[*offset..].chars().next().expect("offset is in bounds");
+                output.push(character);
+                *offset += character.len_utf8();
+            }
+        }
+    }
+    Err(Error::Config { message: "unterminated bracket string".into() })
+}
+
+fn read_config_block_string(text: &str, offset: &mut usize) -> Result<String> {
+    let start = *offset;
+    while *offset + 1 < text.len() {
+        if text.as_bytes()[*offset] == b'|' && text.as_bytes()[*offset + 1] == b']' {
+            let value = text[start..*offset].to_string();
+            *offset += 2;
+            return Ok(value);
+        }
+        let character = text[*offset..].chars().next().expect("offset is in bounds");
+        *offset += character.len_utf8();
+    }
+    Err(Error::Config { message: "unterminated bracket block string".into() })
+}
+
+fn copy_config_quoted_string(text: &str, offset: &mut usize, output: &mut String) -> Result<()> {
+    let is_multiline =
+        text.as_bytes().get(*offset + 1) == Some(&b'"') && text.as_bytes().get(*offset + 2) == Some(&b'"');
+    if is_multiline {
+        output.push_str("\"\"\"");
+        *offset += 3;
+        while *offset + 2 < text.len() {
+            if text.as_bytes()[*offset] == b'"'
+                && text.as_bytes()[*offset + 1] == b'"'
+                && text.as_bytes()[*offset + 2] == b'"'
+            {
+                output.push_str("\"\"\"");
+                *offset += 3;
+                return Ok(());
+            }
+            let character = text[*offset..].chars().next().expect("offset is in bounds");
+            output.push(character);
+            *offset += character.len_utf8();
+        }
+        return Err(Error::Config { message: "unterminated quoted string".into() });
+    }
+
+    output.push('"');
+    *offset += 1;
+    while *offset < text.len() {
+        let character = text[*offset..].chars().next().expect("offset is in bounds");
+        output.push(character);
+        *offset += character.len_utf8();
+        if character == '\\' {
+            let Some(escaped) = text[*offset..].chars().next() else {
+                return Err(Error::Config { message: "unterminated quoted string escape".into() });
+            };
+            output.push(escaped);
+            *offset += escaped.len_utf8();
+        } else if character == '"' {
+            return Ok(());
+        }
+    }
+    Err(Error::Config { message: "unterminated quoted string".into() })
+}
+
+fn copy_config_comment(text: &str, offset: &mut usize, output: &mut String) {
+    while *offset < text.len() {
+        let character = text[*offset..].chars().next().expect("offset is in bounds");
+        output.push(character);
+        *offset += character.len_utf8();
+        if character == '\n' {
+            return;
+        }
+    }
+}
+
+fn push_quoted_string(output: &mut String, value: &str) {
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '\\' => output.push_str("\\\\"),
+            '"' => output.push_str("\\\""),
+            '\n' => output.push_str("\\n"),
+            '\t' => output.push_str("\\t"),
+            '\r' => output.push_str("\\r"),
+            character => output.push(character),
+        }
+    }
+    output.push('"');
 }
 
 fn base16_slot_index(slot: &str) -> Result<usize> {

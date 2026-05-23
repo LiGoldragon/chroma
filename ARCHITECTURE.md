@@ -55,7 +55,7 @@ Each axis has:
 
 Theme has no ramp. `SetTheme` records the requested mode,
 enqueues it to one latest-wins actor per theme concern, and
-returns `(Accepted)` immediately after those actors own the
+returns `Accepted` immediately after those actors own the
 message. The terminal concern persists state for future shells
 only; it never scans PTYs, writes to other terminals, or forces a
 global terminal reload. Ghostty is a native application concern:
@@ -114,7 +114,7 @@ Daemon ↔ CLI is the **signal pattern** documented in
 The CLI binary is a thin signal client: parse NOTA argv into a
 typed request → archive with rkyv → length-prefix → send → read
 reply → bytecheck-validate → print as NOTA. Every mutating
-request returns `(Accepted)` after the daemon accepts ownership
+request returns `Accepted` after the daemon accepts ownership
 of the change; theme scripts, instant gamma writes, and ramp
 setup/read work continue asynchronously.
 
@@ -128,8 +128,8 @@ on inotify push. Parses into a typed `Config`:
   (Theme
     (Concerns Terminal Desktop Ghostty Emacs)
     (Palettes
-      (Dark  (Base00 "#000000") ... (Base0F "#ff5577"))
-      (Light (Base00 "#faf5f0") ... (Base0F "#cc3355")))
+      (Dark  (Base00 [#000000]) ... (Base0F [#ff5577]))
+      (Light (Base00 [#faf5f0]) ... (Base0F [#cc3355])))
     (Adapters
       (Dconf <path>)
       (Emacsclient <path>))

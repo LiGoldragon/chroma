@@ -4,7 +4,7 @@
 //! one actor per visual axis, the theme-concern fanout actor, and
 //! the schedule actor. Mutating CLI requests persist the accepted
 //! state first, enqueue the apply work to the owning actor, and
-//! return `(Accepted)` without waiting for desktop, Ghostty,
+//! return `Accepted` without waiting for desktop, Ghostty,
 //! Emacs, or gamma side effects to finish.
 
 use std::path::{Path, PathBuf};
@@ -197,21 +197,21 @@ impl ChromaRoot {
         self.theme = mode;
         self.persist_theme(mode).await?;
         self.enqueue_theme(mode).await?;
-        Ok(Response::Accepted {})
+        Ok(Response::Accepted)
     }
 
     async fn instant_warmth(&mut self, kelvin: KelvinTemperature) -> Result<Response> {
         self.warmth = kelvin;
         self.persist_warmth(kelvin).await?;
         self.enqueue_warmth(WarmthApplication::Set { kelvin }).await?;
-        Ok(Response::Accepted {})
+        Ok(Response::Accepted)
     }
 
     async fn ramp_warmth(&mut self, target: KelvinTemperature, duration: RampDuration) -> Result<Response> {
         self.warmth = target;
         self.persist_warmth(target).await?;
         self.enqueue_warmth(WarmthApplication::Ramp { target, duration }).await?;
-        Ok(Response::Accepted {})
+        Ok(Response::Accepted)
     }
 
     async fn schedule_warmth_transition(
@@ -229,14 +229,14 @@ impl ChromaRoot {
         self.brightness = percent;
         self.persist_brightness(percent).await?;
         self.enqueue_brightness(BrightnessApplication::Set { percent }).await?;
-        Ok(Response::Accepted {})
+        Ok(Response::Accepted)
     }
 
     async fn ramp_brightness(&mut self, target: BrightnessPercent, duration: RampDuration) -> Result<Response> {
         self.brightness = target;
         self.persist_brightness(target).await?;
         self.enqueue_brightness(BrightnessApplication::Ramp { target, duration }).await?;
-        Ok(Response::Accepted {})
+        Ok(Response::Accepted)
     }
 
     async fn schedule_brightness_transition(
@@ -253,29 +253,29 @@ impl ChromaRoot {
     async fn dispatch(&mut self, request: Request) -> Result<Response> {
         match request {
             Request::SetTheme { mode } => self.set_theme(mode).await,
-            Request::GetTheme {} => Ok(Response::Theme { mode: self.theme }),
+            Request::GetTheme => Ok(Response::Theme { mode: self.theme }),
 
             Request::SetWarmth { level } => self.instant_warmth(level.kelvin()).await,
             Request::SetWarmthKelvin { kelvin } => self.instant_warmth(kelvin).await,
-            Request::GetWarmth {} => Ok(Response::Warmth { kelvin: self.warmth }),
+            Request::GetWarmth => Ok(Response::Warmth { kelvin: self.warmth }),
             Request::StartWarmthRamp { target, duration } => self.ramp_warmth(target.kelvin(), duration).await,
             Request::StartWarmthRampKelvin { target, duration } => self.ramp_warmth(target, duration).await,
-            Request::InterruptWarmth {} => {
+            Request::InterruptWarmth => {
                 self.enqueue_warmth(WarmthApplication::Interrupt).await?;
-                Ok(Response::Accepted {})
+                Ok(Response::Accepted)
             }
 
             Request::SetBrightness { level } => self.instant_brightness(level.percent()).await,
             Request::SetBrightnessPercent { percent } => self.instant_brightness(percent).await,
-            Request::GetBrightness {} => Ok(Response::Brightness { percent: self.brightness }),
+            Request::GetBrightness => Ok(Response::Brightness { percent: self.brightness }),
             Request::StartBrightnessRamp { target, duration } => self.ramp_brightness(target.percent(), duration).await,
             Request::StartBrightnessRampPercent { target, duration } => self.ramp_brightness(target, duration).await,
-            Request::InterruptBrightness {} => {
+            Request::InterruptBrightness => {
                 self.enqueue_brightness(BrightnessApplication::Interrupt).await?;
-                Ok(Response::Accepted {})
+                Ok(Response::Accepted)
             }
 
-            Request::GetState {} => {
+            Request::GetState => {
                 Ok(Response::State { theme: self.theme, kelvin: self.warmth, percent: self.brightness })
             }
         }

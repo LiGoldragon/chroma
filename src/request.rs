@@ -4,7 +4,7 @@
 //! one positional arg). Travels on the wire as a length-prefixed
 //! rkyv archive over the daemon's UDS.
 
-use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaSum};
+use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaEnum};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::brightness::{BrightnessLevel, BrightnessPercent};
@@ -14,19 +14,19 @@ use crate::time::RampDuration;
 use crate::warmth::{KelvinTemperature, WarmthLevel};
 
 /// What the CLI sends to the daemon.
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaSum, Debug, Clone, PartialEq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaEnum, Debug, Clone, PartialEq)]
 pub enum Request {
     /// Switch to a theme mode through native concern actors.
     SetTheme { mode: ThemeMode },
     /// Read the current theme mode.
-    GetTheme {},
+    GetTheme,
 
     /// Set warmth to a named preset (instant; cancels any active ramp).
     SetWarmth { level: WarmthLevel },
     /// Set warmth to an arbitrary kelvin value (instant; cancels any active ramp).
     SetWarmthKelvin { kelvin: KelvinTemperature },
     /// Read the current kelvin.
-    GetWarmth {},
+    GetWarmth,
     /// Begin a gradual warmth ramp toward `target` over `duration`,
     /// starting from the daemon's current temperature reading.
     /// Replaces any in-flight warmth ramp.
@@ -34,14 +34,14 @@ pub enum Request {
     /// Like `StartWarmthRamp`, but with an arbitrary kelvin target.
     StartWarmthRampKelvin { target: KelvinTemperature, duration: RampDuration },
     /// Cancel any in-flight warmth ramp; the screen stays where it is.
-    InterruptWarmth {},
+    InterruptWarmth,
 
     /// Set brightness to a named preset (instant; cancels any active ramp).
     SetBrightness { level: BrightnessLevel },
     /// Set brightness to an arbitrary percent (instant; cancels any active ramp).
     SetBrightnessPercent { percent: BrightnessPercent },
     /// Read the current brightness percent.
-    GetBrightness {},
+    GetBrightness,
     /// Begin a gradual brightness ramp toward `target` over `duration`,
     /// starting from the daemon's current brightness reading.
     /// Replaces any in-flight brightness ramp.
@@ -49,10 +49,10 @@ pub enum Request {
     /// Like `StartBrightnessRamp`, but with an arbitrary percent target.
     StartBrightnessRampPercent { target: BrightnessPercent, duration: RampDuration },
     /// Cancel any in-flight brightness ramp.
-    InterruptBrightness {},
+    InterruptBrightness,
 
     /// Read the full visual state (theme + warmth + brightness).
-    GetState {},
+    GetState,
 }
 
 impl Request {

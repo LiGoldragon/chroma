@@ -9,7 +9,7 @@
 fn main() -> chroma::Result<()> {
     let mut args = std::env::args().skip(1);
     let request_text = args.next().unwrap_or_else(|| {
-        eprintln!("usage: chroma '(SetWarmth Warm)' | '(SetWarmthKelvin 3500)' | '(GetWarmth)' | …");
+        eprintln!("usage: chroma '(SetWarmth Warm)' | '(SetWarmthKelvin 3500)' | 'GetWarmth' | …");
         std::process::exit(2);
     });
 

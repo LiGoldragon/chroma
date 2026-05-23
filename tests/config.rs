@@ -105,6 +105,20 @@ fn config_file_extracts_full_visual_config_from_nota_config() {
 }
 
 #[test]
+fn config_paths_with_apostrophes_do_not_require_quote_delimiters() {
+    let fixture = Fixture::new();
+    let config = fixture
+        .write_config(&NATIVE_CONFIG.replace("[/tmp/chroma-test/dark.ghostty]", "[/tmp/chroma-test/dark's.ghostty]"));
+
+    let theme = ConfigFile::from_path(config).theme_axis().expect("theme axis decodes");
+
+    assert_eq!(
+        theme.ghostty_config_templates.as_ref().map(|templates| templates.dark.to_string_lossy().to_string()),
+        Some("/tmp/chroma-test/dark's.ghostty".into())
+    );
+}
+
+#[test]
 fn config_file_decodes_scheduled_warmth_from_nota_config() {
     let fixture = Fixture::new();
     let config = fixture.write_config(&NATIVE_CONFIG.replace(
@@ -134,7 +148,7 @@ fn config_file_decodes_scheduled_warmth_from_nota_config() {
 #[test]
 fn hc_chroma_001_apply_command_records_are_rejected_not_interpreted() {
     let fixture = Fixture::new();
-    let config = fixture.write_config("(Config (Theme (ApplyCommand \"/tmp/apply-theme\")))");
+    let config = fixture.write_config("(Config (Theme (ApplyCommand [/tmp/apply-theme])))");
 
     let error = ConfigFile::from_path(config).theme_axis().expect_err("apply command must fail");
 
@@ -144,7 +158,7 @@ fn hc_chroma_001_apply_command_records_are_rejected_not_interpreted() {
 #[test]
 fn hc_chroma_002_apply_targets_records_are_rejected_not_migrated() {
     let fixture = Fixture::new();
-    let config = fixture.write_config("(Config (Theme (ApplyTargets (Target Terminal \"/tmp/apply-terminal\"))))");
+    let config = fixture.write_config("(Config (Theme (ApplyTargets (Target Terminal [/tmp/apply-terminal]))))");
 
     let error = ConfigFile::from_path(config).theme_axis().expect_err("apply targets must fail");
 
@@ -165,7 +179,7 @@ fn hc_chroma_003_legacy_theme_concern_is_rejected_not_retained() {
 #[test]
 fn hc_chroma_004_yaml_data_inputs_are_rejected_in_favor_of_nota() {
     let fixture = Fixture::new();
-    let config = fixture.write_config(&NATIVE_CONFIG.replace("(FontPointSize 14)", "(PaletteFile \"ignis.yaml\")"));
+    let config = fixture.write_config(&NATIVE_CONFIG.replace("(FontPointSize 14)", "(PaletteFile [ignis.yaml])"));
 
     let error = ConfigFile::from_path(config).theme_axis().expect_err("yaml input must fail");
 
@@ -177,8 +191,8 @@ fn ghostty_concern_requires_config_templates() {
     let fixture = Fixture::new();
     let config = fixture.write_config(&NATIVE_CONFIG.replace(
         "    (GhosttyConfigTemplates
-      (Dark \"/tmp/chroma-test/dark.ghostty\")
-      (Light \"/tmp/chroma-test/light.ghostty\"))\n",
+      (Dark [/tmp/chroma-test/dark.ghostty])
+      (Light [/tmp/chroma-test/light.ghostty]))\n",
         "",
     ));
 
@@ -193,46 +207,46 @@ const NATIVE_CONFIG: &str = r##"
     (Concerns Terminal Desktop Ghostty)
     (Palettes
       (Dark
-        (Base00 "#000000")
-        (Base01 "#1a1a1a")
-        (Base02 "#2d2d2d")
-        (Base03 "#505050")
-        (Base04 "#b0b0b0")
-        (Base05 "#d0d0d0")
-        (Base06 "#e0e0e0")
-        (Base07 "#ffffff")
-        (Base08 "#ff0066")
-        (Base09 "#ff8800")
-        (Base0A "#f5c000")
-        (Base0B "#00cc44")
-        (Base0C "#cc44ff")
-        (Base0D "#e040a0")
-        (Base0E "#bb44ee")
-        (Base0F "#ff5577"))
+        (Base00 [#000000])
+        (Base01 [#1a1a1a])
+        (Base02 [#2d2d2d])
+        (Base03 [#505050])
+        (Base04 [#b0b0b0])
+        (Base05 [#d0d0d0])
+        (Base06 [#e0e0e0])
+        (Base07 [#ffffff])
+        (Base08 [#ff0066])
+        (Base09 [#ff8800])
+        (Base0A [#f5c000])
+        (Base0B [#00cc44])
+        (Base0C [#cc44ff])
+        (Base0D [#e040a0])
+        (Base0E [#bb44ee])
+        (Base0F [#ff5577]))
       (Light
-        (Base00 "#faf5f0")
-        (Base01 "#efe8e2")
-        (Base02 "#ddd5ce")
-        (Base03 "#887a70")
-        (Base04 "#6a5e55")
-        (Base05 "#3d3530")
-        (Base06 "#2a2420")
-        (Base07 "#1a1510")
-        (Base08 "#cc0044")
-        (Base09 "#d06600")
-        (Base0A "#b89000")
-        (Base0B "#1a8a30")
-        (Base0C "#9930cc")
-        (Base0D "#b03080")
-        (Base0E "#8822bb")
-        (Base0F "#cc3355")))
+        (Base00 [#faf5f0])
+        (Base01 [#efe8e2])
+        (Base02 [#ddd5ce])
+        (Base03 [#887a70])
+        (Base04 [#6a5e55])
+        (Base05 [#3d3530])
+        (Base06 [#2a2420])
+        (Base07 [#1a1510])
+        (Base08 [#cc0044])
+        (Base09 [#d06600])
+        (Base0A [#b89000])
+        (Base0B [#1a8a30])
+        (Base0C [#9930cc])
+        (Base0D [#b03080])
+        (Base0E [#8822bb])
+        (Base0F [#cc3355])))
     (Adapters
-      (Dconf "/bin/dconf")
-      (Emacsclient "/bin/emacsclient"))
+      (Dconf [/bin/dconf])
+      (Emacsclient [/bin/emacsclient]))
     (FontPointSize 14)
     (GhosttyConfigTemplates
-      (Dark "/tmp/chroma-test/dark.ghostty")
-      (Light "/tmp/chroma-test/light.ghostty"))
+      (Dark [/tmp/chroma-test/dark.ghostty])
+      (Light [/tmp/chroma-test/light.ghostty]))
     (Schedule
       (Waypoint (CivilDawn (SignedMinutes 0)) Light)
       (Waypoint (CivilDusk (SignedMinutes 0)) Dark)

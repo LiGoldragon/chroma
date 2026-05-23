@@ -35,8 +35,8 @@ fn set_warmth_kelvin_arbitrary() {
 
 #[test]
 fn get_warmth_unit() {
-    let request = round_trip_nota("(GetWarmth)");
-    assert_eq!(request, Request::GetWarmth {});
+    let request = round_trip_nota("GetWarmth");
+    assert_eq!(request, Request::GetWarmth);
     round_trip_rkyv(&request);
 }
 
@@ -90,8 +90,8 @@ fn start_warmth_ramp_seconds() {
 
 #[test]
 fn interrupt_warmth() {
-    let request = round_trip_nota("(InterruptWarmth)");
-    assert_eq!(request, Request::InterruptWarmth {});
+    let request = round_trip_nota("InterruptWarmth");
+    assert_eq!(request, Request::InterruptWarmth);
     round_trip_rkyv(&request);
 }
 
@@ -134,14 +134,14 @@ fn start_brightness_ramp_percent() {
 
 #[test]
 fn interrupt_brightness() {
-    let request = round_trip_nota("(InterruptBrightness)");
-    assert_eq!(request, Request::InterruptBrightness {});
+    let request = round_trip_nota("InterruptBrightness");
+    assert_eq!(request, Request::InterruptBrightness);
     round_trip_rkyv(&request);
 }
 
 #[test]
 fn get_state() {
-    let request = round_trip_nota("(GetState)");
-    assert_eq!(request, Request::GetState {});
+    let request = round_trip_nota("GetState");
+    assert_eq!(request, Request::GetState);
     round_trip_rkyv(&request);
 }

@@ -19,7 +19,7 @@ wrapper with a single user-service component:
   Unix domain socket using length-prefixed rkyv frames.
 - **Native theme concerns** — Chroma owns terminal, desktop,
   Ghostty, and Emacs theme application as independent concern
-  actors. `SetTheme` returns `(Accepted)` once those actors own
+  actors. `SetTheme` returns `Accepted` once those actors own
   the request; slow desktop or app work cannot hold terminal
   updates hostage.
 

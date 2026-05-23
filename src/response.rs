@@ -3,7 +3,7 @@
 //! Travels on the wire as a length-prefixed rkyv archive; the
 //! CLI prints it as a single NOTA record.
 
-use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaSum};
+use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaEnum};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::brightness::BrightnessPercent;
@@ -12,10 +12,10 @@ use crate::theme::ThemeMode;
 use crate::warmth::KelvinTemperature;
 
 /// What the daemon sends back.
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaSum, Debug, Clone, PartialEq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaEnum, Debug, Clone, PartialEq)]
 pub enum Response {
     /// The daemon accepted the request; the side effect may still be running.
-    Accepted {},
+    Accepted,
     /// The current theme.
     Theme { mode: ThemeMode },
     /// The current warmth, as a kelvin reading.

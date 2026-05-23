@@ -23,7 +23,7 @@ It replaces darkman + the `nightshift-*` systemd services + the
   scheduled events do not share fires.
 - **Native theme concerns.** `chroma` owns terminal,
   desktop/GTK, Ghostty, and Emacs theme application as
-  independent concern actors. `SetTheme` returns `(Accepted)`
+  independent concern actors. `SetTheme` returns `Accepted`
   after those actors own the message; do not make CLI requests
   wait on desktop mutation. Do not add configured apply
   commands, shell script boundaries, or retained legacy target
