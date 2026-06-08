@@ -10,7 +10,7 @@ use core::fmt;
 use core::time::Duration;
 
 use crate::error::{Error, Result};
-use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode};
+use nota_next::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 /// A positive duration over which a ramped axis interpolates.
@@ -64,38 +64,40 @@ impl fmt::Display for RampDuration {
 // NOTA wire form: `(Minutes <n>)` or `(Seconds <n>)`. Encoded
 // in whichever form fits cleanly: if the duration is a whole
 // number of minutes, emit `(Minutes <n>)`; otherwise emit
-// `(Seconds <n>)`. Decoder accepts either.
+// `(Seconds <n>)`. Decode accepts either.
 impl NotaEncode for RampDuration {
-    fn encode(&self, encoder: &mut Encoder) -> nota_codec::Result<()> {
+    fn to_nota(&self) -> String {
         if self.0.is_multiple_of(60) {
-            encoder.start_record("Minutes")?;
-            encoder.write_u64(self.0 / 60)?;
-            encoder.end_record()
+            Delimiter::Parenthesis.wrap(["Minutes".to_owned(), (self.0 / 60).to_string()])
         } else {
-            encoder.start_record("Seconds")?;
-            encoder.write_u64(self.0)?;
-            encoder.end_record()
+            Delimiter::Parenthesis.wrap(["Seconds".to_owned(), self.0.to_string()])
         }
     }
 }
 
 impl NotaDecode for RampDuration {
-    fn decode(decoder: &mut Decoder<'_>) -> nota_codec::Result<Self> {
-        let head = decoder.peek_record_head()?;
-        match head.as_str() {
+    fn from_nota_block(block: &Block) -> std::result::Result<Self, NotaDecodeError> {
+        let children = NotaBlock::new(block).expect_delimited(Delimiter::Parenthesis, "RampDuration")?;
+        if children.len() != 2 {
+            return Err(NotaDecodeError::ExpectedRootCount {
+                type_name: "RampDuration",
+                expected: 2,
+                found: children.len(),
+            });
+        }
+        let head = children[0]
+            .demote_to_string()
+            .ok_or(NotaDecodeError::ExpectedAtom { type_name: "RampDuration variant" })?;
+        match head {
             "Minutes" => {
-                decoder.expect_record_head("Minutes")?;
-                let minutes = decoder.read_u64()?;
-                decoder.expect_record_end()?;
+                let minutes = NotaBlock::new(&children[1]).parse_integer()?;
                 Ok(Self::from_seconds(minutes.saturating_mul(60)))
             }
             "Seconds" => {
-                decoder.expect_record_head("Seconds")?;
-                let seconds = decoder.read_u64()?;
-                decoder.expect_record_end()?;
+                let seconds = NotaBlock::new(&children[1]).parse_integer()?;
                 Ok(Self::from_seconds(seconds))
             }
-            other => Err(nota_codec::Error::UnknownVariant { enum_name: "RampDuration", got: other.to_string() }),
+            other => Err(NotaDecodeError::UnknownVariant { enum_name: "RampDuration", variant: other.to_string() }),
         }
     }
 }

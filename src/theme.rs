@@ -12,7 +12,7 @@ use std::process::Stdio;
 use kameo::actor::{Actor, ActorRef, Spawn, WeakActorRef};
 use kameo::error::{ActorStopReason, Infallible};
 use kameo::message::{Context, Message};
-use nota_codec::NotaEnum;
+use nota_next::{NotaDecode, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tokio::time::{Duration, timeout};
 use zbus::zvariant::Value;
@@ -21,7 +21,7 @@ use crate::error::{Error, Result};
 use crate::time::RampTrigger;
 
 /// The active colour scheme.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, NotaEnum, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, NotaDecode, NotaEncode, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum ThemeMode {
     Dark,
     Light,

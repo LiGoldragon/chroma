@@ -14,7 +14,7 @@ use crate::theme::{
 };
 use crate::time::{LocalHour, LocalMinute, RampDuration, RampTrigger, RelativeSolarOffset, SignedMinutes};
 use crate::warmth::{WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint};
-use nota_codec::{Lexer, Token};
+use nota_next::{Block, Delimiter, Document, NotaBlock};
 
 /// The on-disk Chroma configuration file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,183 +88,10 @@ impl<'input> ConfigText<'input> {
     }
 
     fn config(&self) -> Result<Config> {
-        self.reject_removed_or_non_nota_inputs()?;
-        let document = ConfigDocument::parse(&config_text_with_bracket_strings_as_quoted(self.text)?)?;
+        let document = ConfigDocument::parse(self.text)?;
+        document.reject_removed_or_non_nota_inputs()?;
         document.config()
     }
-
-    fn reject_removed_or_non_nota_inputs(&self) -> Result<()> {
-        let text = config_text_with_bracket_strings_as_quoted(self.text)?;
-        let mut lexer = Lexer::new(&text);
-        while let Some(token) = lexer.next_token()? {
-            match token {
-                Token::Ident(value) | Token::Str(value) => {
-                    if matches!(value.as_str(), "ApplyCommand" | "ApplyTargets" | "ThemeApplyTarget" | "Legacy") {
-                        return Err(Error::Config {
-                            message: format!("{value} belongs to the removed shell-apply architecture"),
-                        });
-                    }
-                    let lower = value.to_ascii_lowercase();
-                    if lower.contains(".yaml") || lower.contains(".yml") {
-                        return Err(Error::Config { message: "YAML inputs are forbidden; use NOTA".into() });
-                    }
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-}
-
-fn config_text_with_bracket_strings_as_quoted(text: &str) -> Result<String> {
-    let mut output = String::with_capacity(text.len());
-    let mut offset = 0;
-    while offset < text.len() {
-        let bytes = text.as_bytes();
-        match bytes[offset] {
-            b'[' if bytes.get(offset + 1) == Some(&b'|') => {
-                offset += 2;
-                let value = read_config_block_string(text, &mut offset)?;
-                push_quoted_string(&mut output, &value);
-            }
-            b'[' => {
-                offset += 1;
-                let value = read_config_bracket_string(text, &mut offset)?;
-                push_quoted_string(&mut output, &value);
-            }
-            b'"' => copy_config_quoted_string(text, &mut offset, &mut output)?,
-            b';' if bytes.get(offset + 1) == Some(&b';') => {
-                copy_config_comment(text, &mut offset, &mut output);
-            }
-            _ => {
-                let character = text[offset..].chars().next().expect("offset is in bounds");
-                output.push(character);
-                offset += character.len_utf8();
-            }
-        }
-    }
-    Ok(output)
-}
-
-fn read_config_bracket_string(text: &str, offset: &mut usize) -> Result<String> {
-    let mut output = String::new();
-    while *offset < text.len() {
-        match text.as_bytes()[*offset] {
-            b']' => {
-                *offset += 1;
-                return Ok(output);
-            }
-            b'\n' => {
-                return Err(Error::Config { message: "newline in bracket string".into() });
-            }
-            b'\\' => {
-                let Some(escape) = text.as_bytes().get(*offset + 1).copied() else {
-                    return Err(Error::Config { message: "unterminated bracket string escape".into() });
-                };
-                let character = match escape {
-                    b'\\' => '\\',
-                    b']' => ']',
-                    b'n' => '\n',
-                    b't' => '\t',
-                    b'r' => '\r',
-                    other => {
-                        return Err(Error::Config {
-                            message: format!("unknown bracket string escape {}", other as char),
-                        });
-                    }
-                };
-                output.push(character);
-                *offset += 2;
-            }
-            _ => {
-                let character = text[*offset..].chars().next().expect("offset is in bounds");
-                output.push(character);
-                *offset += character.len_utf8();
-            }
-        }
-    }
-    Err(Error::Config { message: "unterminated bracket string".into() })
-}
-
-fn read_config_block_string(text: &str, offset: &mut usize) -> Result<String> {
-    let start = *offset;
-    while *offset + 1 < text.len() {
-        if text.as_bytes()[*offset] == b'|' && text.as_bytes()[*offset + 1] == b']' {
-            let value = text[start..*offset].to_string();
-            *offset += 2;
-            return Ok(value);
-        }
-        let character = text[*offset..].chars().next().expect("offset is in bounds");
-        *offset += character.len_utf8();
-    }
-    Err(Error::Config { message: "unterminated bracket block string".into() })
-}
-
-fn copy_config_quoted_string(text: &str, offset: &mut usize, output: &mut String) -> Result<()> {
-    let is_multiline =
-        text.as_bytes().get(*offset + 1) == Some(&b'"') && text.as_bytes().get(*offset + 2) == Some(&b'"');
-    if is_multiline {
-        output.push_str("\"\"\"");
-        *offset += 3;
-        while *offset + 2 < text.len() {
-            if text.as_bytes()[*offset] == b'"'
-                && text.as_bytes()[*offset + 1] == b'"'
-                && text.as_bytes()[*offset + 2] == b'"'
-            {
-                output.push_str("\"\"\"");
-                *offset += 3;
-                return Ok(());
-            }
-            let character = text[*offset..].chars().next().expect("offset is in bounds");
-            output.push(character);
-            *offset += character.len_utf8();
-        }
-        return Err(Error::Config { message: "unterminated quoted string".into() });
-    }
-
-    output.push('"');
-    *offset += 1;
-    while *offset < text.len() {
-        let character = text[*offset..].chars().next().expect("offset is in bounds");
-        output.push(character);
-        *offset += character.len_utf8();
-        if character == '\\' {
-            let Some(escaped) = text[*offset..].chars().next() else {
-                return Err(Error::Config { message: "unterminated quoted string escape".into() });
-            };
-            output.push(escaped);
-            *offset += escaped.len_utf8();
-        } else if character == '"' {
-            return Ok(());
-        }
-    }
-    Err(Error::Config { message: "unterminated quoted string".into() })
-}
-
-fn copy_config_comment(text: &str, offset: &mut usize, output: &mut String) {
-    while *offset < text.len() {
-        let character = text[*offset..].chars().next().expect("offset is in bounds");
-        output.push(character);
-        *offset += character.len_utf8();
-        if character == '\n' {
-            return;
-        }
-    }
-}
-
-fn push_quoted_string(output: &mut String, value: &str) {
-    output.push('"');
-    for character in value.chars() {
-        match character {
-            '\\' => output.push_str("\\\\"),
-            '"' => output.push_str("\\\""),
-            '\n' => output.push_str("\\n"),
-            '\t' => output.push_str("\\t"),
-            '\r' => output.push_str("\\r"),
-            character => output.push(character),
-        }
-    }
-    output.push('"');
 }
 
 fn base16_slot_index(slot: &str) -> Result<usize> {
@@ -343,6 +170,56 @@ enum ConfigNode {
 }
 
 impl ConfigNode {
+    fn from_block(block: &Block) -> Result<Self> {
+        if let Some(children) = block.as_delimited(Delimiter::Parenthesis) {
+            return Self::from_parenthesis(children);
+        }
+        if block.is_square_bracket() || block.is_pipe_text() {
+            return Ok(Self::Str(NotaBlock::new(block).parse_string()?));
+        }
+        if let Some(value) = block.demote_to_string() {
+            if let Ok(integer) = value.parse::<i128>() {
+                return Ok(Self::Int(integer));
+            }
+            return Ok(Self::Ident(value.to_owned()));
+        }
+        Err(Error::Config { message: format!("unsupported block in Chroma config: {block:?}") })
+    }
+
+    fn from_parenthesis(children: &[Block]) -> Result<Self> {
+        let Some(head_block) = children.first() else {
+            return Err(Error::Config { message: "record ended before head".into() });
+        };
+        let head = Self::from_block(head_block)?.atom_name("record head")?.to_owned();
+        let body = children[1..].iter().map(Self::from_block).collect::<Result<Vec<_>>>()?;
+        Ok(Self::Record { head, body })
+    }
+
+    fn reject_removed_or_non_nota_inputs(&self) -> Result<()> {
+        match self {
+            Self::Record { head, body } => {
+                Self::reject_value(head)?;
+                for node in body {
+                    node.reject_removed_or_non_nota_inputs()?;
+                }
+                Ok(())
+            }
+            Self::Ident(value) | Self::Str(value) => Self::reject_value(value),
+            Self::Int(_) => Ok(()),
+        }
+    }
+
+    fn reject_value(value: &str) -> Result<()> {
+        if matches!(value, "ApplyCommand" | "ApplyTargets" | "ThemeApplyTarget" | "Legacy") {
+            return Err(Error::Config { message: format!("{value} belongs to the removed shell-apply architecture") });
+        }
+        let lower = value.to_ascii_lowercase();
+        if lower.contains(".yaml") || lower.contains(".yml") {
+            return Err(Error::Config { message: "YAML inputs are forbidden; use NOTA".into() });
+        }
+        Ok(())
+    }
+
     fn atom_name(&self, label: &str) -> Result<&str> {
         match self {
             ConfigNode::Ident(value) | ConfigNode::Str(value) => Ok(value),
@@ -378,12 +255,16 @@ struct ConfigDocument {
 
 impl ConfigDocument {
     fn parse(text: &str) -> Result<Self> {
-        let mut lexer = Lexer::new(text);
-        let mut roots = Vec::new();
-        while let Some(token) = lexer.next_token()? {
-            roots.push(Self::parse_node(token, &mut lexer)?);
-        }
+        let document = Document::parse(text).map_err(nota_next::NotaDecodeError::from)?;
+        let roots = document.root_objects().iter().map(ConfigNode::from_block).collect::<Result<Vec<_>>>()?;
         Ok(Self { roots })
+    }
+
+    fn reject_removed_or_non_nota_inputs(&self) -> Result<()> {
+        for root in &self.roots {
+            root.reject_removed_or_non_nota_inputs()?;
+        }
+        Ok(())
     }
 
     fn config(&self) -> Result<Config> {
@@ -393,37 +274,6 @@ impl ConfigDocument {
             warmth: parse_warmth_axis(required_node(root, "Warmth")?.body("Warmth")?)?,
             brightness: parse_brightness_axis(required_node(root, "Brightness")?.body("Brightness")?)?,
         })
-    }
-
-    fn parse_node(token: Token, lexer: &mut Lexer<'_>) -> Result<ConfigNode> {
-        match token {
-            Token::LParen => Self::parse_record(lexer),
-            Token::Ident(value) => Ok(ConfigNode::Ident(value)),
-            Token::Str(value) => Ok(ConfigNode::Str(value)),
-            Token::Int(value) => Ok(ConfigNode::Int(value)),
-            Token::UInt(value) => Ok(ConfigNode::Int(value as i128)),
-            Token::RParen => Err(Error::Config { message: "unexpected closing paren".into() }),
-            other => Err(Error::Config { message: format!("unsupported token in Chroma config: {other:?}") }),
-        }
-    }
-
-    fn parse_record(lexer: &mut Lexer<'_>) -> Result<ConfigNode> {
-        let head = match lexer.next_token()? {
-            Some(Token::Ident(head)) => head,
-            Some(Token::Str(head)) => head,
-            Some(token) => {
-                return Err(Error::Config { message: format!("record head expected identifier, got {token:?}") });
-            }
-            None => return Err(Error::Config { message: "record ended before head".into() }),
-        };
-        let mut body = Vec::new();
-        loop {
-            match lexer.next_token()? {
-                Some(Token::RParen) => return Ok(ConfigNode::Record { head, body }),
-                Some(token) => body.push(Self::parse_node(token, lexer)?),
-                None => return Err(Error::Config { message: format!("{head} ended before closing paren") }),
-            }
-        }
     }
 }
 

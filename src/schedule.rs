@@ -212,7 +212,7 @@ where
 {
     fn new(default: Value, events: impl IntoIterator<Item = TimedEvent<Value>>) -> Self {
         let mut events = events.into_iter().collect::<Vec<_>>();
-        events.sort_by(|left, right| left.time.cmp(&right.time));
+        events.sort_by_key(|event| event.time);
         Self { default, events }
     }
 
@@ -248,7 +248,7 @@ where
 {
     fn new(default: Value, events: impl IntoIterator<Item = RampedEvent<Value>>) -> Self {
         let mut events = events.into_iter().collect::<Vec<_>>();
-        events.sort_by(|left, right| left.time.cmp(&right.time));
+        events.sort_by_key(|event| event.time);
         Self { default, events }
     }
 

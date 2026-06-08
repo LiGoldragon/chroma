@@ -11,14 +11,16 @@
 
 use core::fmt;
 
-use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaEnum};
+use nota_next::{Block, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::error::{Error, Result};
 use crate::time::{RampDuration, RampTrigger};
 
 /// A discrete brightness level on the daemon's standard ladder.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, NotaEnum, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, Hash, NotaDecode, NotaEncode, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub enum BrightnessLevel {
     Dim,
     Dimmer,
@@ -149,15 +151,15 @@ impl fmt::Display for BrightnessPercent {
 // Hand-written NOTA codec — routes decode through `new` so
 // out-of-range values clamp consistently.
 impl NotaEncode for BrightnessPercent {
-    fn encode(&self, encoder: &mut Encoder) -> nota_codec::Result<()> {
-        encoder.write_u64(self.0 as u64)
+    fn to_nota(&self) -> String {
+        self.0.to_string()
     }
 }
 
 impl NotaDecode for BrightnessPercent {
-    fn decode(decoder: &mut Decoder<'_>) -> nota_codec::Result<Self> {
-        let raw = decoder.read_u8()?;
-        Ok(Self::new(raw))
+    fn from_nota_block(block: &Block) -> std::result::Result<Self, NotaDecodeError> {
+        let raw = NotaBlock::new(block).parse_u16()?;
+        Ok(Self::new(raw.min(u16::from(u8::MAX)) as u8))
     }
 }
 

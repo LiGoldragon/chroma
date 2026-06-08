@@ -1,15 +1,12 @@
 use chroma::{BrightnessLevel, BrightnessPercent};
-use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode};
+use nota_next::{NotaDecode, NotaEncode, NotaSource};
 
 fn round_trip_nota<T>(value: &T) -> T
 where
     T: NotaEncode + NotaDecode + Clone,
 {
-    let mut encoder = Encoder::new();
-    value.encode(&mut encoder).expect("encode");
-    let text = encoder.into_string();
-    let mut decoder = Decoder::new(&text);
-    T::decode(&mut decoder).expect("decode")
+    let text = value.to_nota();
+    NotaSource::new(&text).parse().expect("decode")
 }
 
 #[test]
@@ -177,7 +174,6 @@ fn nota_round_trips_every_level() {
 
 #[test]
 fn nota_encodes_as_pascal_variant_name() {
-    let mut encoder = Encoder::new();
-    BrightnessLevel::Brightest.encode(&mut encoder).expect("encode");
-    assert_eq!(encoder.into_string(), "Brightest");
+    let text = BrightnessLevel::Brightest.to_nota();
+    assert_eq!(text, "Brightest");
 }
