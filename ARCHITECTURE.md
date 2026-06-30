@@ -9,7 +9,17 @@ persisted state. The daemon replaces darkman, the
 orchestration that lives in `CriomOS-home` today.
 
 This file describes what the system **is** today (the shape that
-ships).
+ships), and the durable direction it is built toward.
+
+## Direction — today, not eventually
+
+Chroma is built rightly for today's desktop colour-state need on
+today's stack (Rust, redb/rkyv, Unix-socket signal, zbus to
+wl-gammarelay-rs and geoclue2). The daemon is named for what it
+manages — the colour state of the display; it applies the existing
+**Ignis** palette, it does not author it. Migration of the CLI ↔
+daemon transport onto the eventual Persona fabric is future work,
+not a current concern.
 
 ## Capability boundary
 
