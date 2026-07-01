@@ -102,4 +102,4 @@ prompts (always `-m '<msg>'`).
 - `lore/rust/rkyv.md` — wire format discipline.
 - `HARD-CONSTRAINTS.md` — architecture locks and matching tests.
 - `~/primary/repos/signal` — canonical signal pattern reference.
-- `~/primary/repos/lojix-cli` — canonical NOTA-on-argv CLI shape.
+- `~/primary/repos/lojix` — typed NOTA client shape.

@@ -141,4 +141,4 @@ If a change touches one of these, the change goes upstream
 - `~/primary/skills/actor-systems.md` — actor-system discipline.
 - `lore/rust/rkyv.md` — wire-format discipline, feature pinning.
 - `~/primary/repos/signal` — the canonical signal pattern.
-- `~/primary/repos/lojix-cli` — canonical NOTA-on-argv CLI.
+- `~/primary/repos/lojix` — typed NOTA client shape.
