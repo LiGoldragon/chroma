@@ -4,7 +4,7 @@
 //! one positional arg). Travels on the wire as a length-prefixed
 //! rkyv archive over the daemon's UDS.
 
-use nota_next::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode, NotaSource};
+use nota::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode, NotaSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::brightness::{BrightnessLevel, BrightnessPercent};

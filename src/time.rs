@@ -10,7 +10,7 @@ use core::fmt;
 use core::time::Duration;
 
 use crate::error::{Error, Result};
-use nota_next::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode};
+use nota::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 /// A positive duration over which a ramped axis interpolates.

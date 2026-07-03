@@ -15,7 +15,7 @@ use crate::theme::{
 };
 use crate::time::{LocalHour, LocalMinute, RampDuration, RampTrigger, RelativeSolarOffset, SignedMinutes};
 use crate::warmth::{WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint};
-use nota_next::{Block, Delimiter, Document, NotaBlock};
+use nota::{Block, Delimiter, Document, NotaBlock};
 
 /// The on-disk Chroma configuration file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -256,7 +256,7 @@ struct ConfigDocument {
 
 impl ConfigDocument {
     fn parse(text: &str) -> Result<Self> {
-        let document = Document::parse(text).map_err(nota_next::NotaDecodeError::from)?;
+        let document = Document::parse(text).map_err(nota::NotaDecodeError::from)?;
         let roots = document.root_objects().iter().map(ConfigNode::from_block).collect::<Result<Vec<_>>>()?;
         Ok(Self { roots })
     }

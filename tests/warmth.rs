@@ -1,5 +1,5 @@
 use chroma::{KelvinTemperature, WarmthLevel};
-use nota_next::{NotaDecode, NotaEncode, NotaSource};
+use nota::{NotaDecode, NotaEncode, NotaSource};
 
 fn round_trip_nota<T>(value: &T) -> T
 where

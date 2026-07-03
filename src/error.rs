@@ -13,7 +13,7 @@ use thiserror::Error as ThisError;
 pub enum Error {
     /// Failed to parse a NOTA document at the CLI or config boundary.
     #[error("nota parse failed: {0}")]
-    NotaParse(#[from] nota_next::NotaDecodeError),
+    NotaParse(#[from] nota::NotaDecodeError),
 
     /// Failed to encode or decode an rkyv archive on the wire.
     #[error("rkyv codec failed: {0}")]

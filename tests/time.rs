@@ -1,6 +1,6 @@
 use chroma::{LocalHour, LocalMinute, RampDuration, RampTrigger, RelativeSolarOffset, SignedMinutes};
 use core::time::Duration;
-use nota_next::{NotaDecode, NotaEncode, NotaSource};
+use nota::{NotaDecode, NotaEncode, NotaSource};
 
 fn round_trip_nota<T>(value: &T) -> T
 where

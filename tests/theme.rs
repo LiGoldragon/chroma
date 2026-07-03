@@ -3,7 +3,7 @@ use chroma::{
     ThemePalettes, ThemeSchedule,
 };
 use kameo::actor::ActorRef;
-use nota_next::{NotaDecode, NotaEncode, NotaSource};
+use nota::{NotaDecode, NotaEncode, NotaSource};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncReadExt;
