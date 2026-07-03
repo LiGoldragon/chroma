@@ -437,10 +437,9 @@ impl Message<ApplyThemeConcern> for TerminalThemeConcern {
 }
 
 impl TerminalThemeConcern {
-    async fn apply(&self, mode: ThemeMode, palette: ThemePalette) -> Result<()> {
+    async fn apply(&self, _mode: ThemeMode, palette: ThemePalette) -> Result<()> {
         let state_dir = state_home()?.join("chroma");
         tokio::fs::create_dir_all(&state_dir).await?;
-        tokio::fs::write(state_dir.join("current-mode"), format!("{mode}\n")).await?;
         tokio::fs::write(
             state_dir.join("fzf-theme.sh"),
             format!("export FZF_DEFAULT_OPTS=\"$FZF_DEFAULT_OPTS {}\"\n", palette.fzf_options()),

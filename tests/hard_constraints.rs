@@ -7,10 +7,11 @@ fn hc_chroma_005_terminal_concern_does_not_broadcast_to_pty_inventory() {
 }
 
 #[test]
-fn hc_chroma_006_daemon_does_not_trigger_global_terminal_reload_files() {
+fn hc_chroma_006_daemon_does_not_trigger_global_terminal_reload_files_or_pi_mode_sidecar() {
     let theme_source = include_str!("../src/theme.rs");
 
     assert!(!theme_source.contains("wezterm-reload"));
+    assert!(!theme_source.contains("current-mode"));
 }
 
 #[test]
