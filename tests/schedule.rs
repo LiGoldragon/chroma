@@ -44,6 +44,7 @@ fn test_theme_axis(schedule: ThemeSchedule) -> ThemeAxis {
         adapters: ThemeAdapters::default(),
         font_point_size: 12,
         ghostty_config_templates: None,
+        pi_theme_control: None,
         schedule,
     }
 }

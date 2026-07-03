@@ -34,7 +34,7 @@ Chroma owns:
   triggers are used
 - the orchestration of ramps (start, interrupt, replace)
 - the native theme application concerns: terminal, desktop/GTK,
-  Ghostty, and Emacs
+  Ghostty, Emacs, and running Pi sessions
 
 Chroma does **not** own:
 
@@ -68,7 +68,11 @@ enqueues it to one latest-wins actor per theme concern, and
 returns `Accepted` immediately after those actors own the
 message. The terminal concern persists state for future shells
 only; it never scans PTYs, writes to other terminals, or forces a
-global terminal reload. Ghostty is a native application concern:
+global terminal reload. The Pi concern pushes one minimal line
+frame (`dark\n` or `light\n`) to the configured Unix-stream socket;
+connection failures and short timeout failures are logged by that
+concern and do not fail the theme switch. Ghostty is a native
+application concern:
 Chroma reads the complete Ghostty config template for the target
 mode, copies it to the mutable `config.ghostty` file under the
 user config directory, then sends the running Ghostty application
@@ -90,7 +94,8 @@ Supervisor
 │   ├── TerminalThemeConcern
 │   ├── DesktopThemeConcern
 │   ├── GhosttyThemeConcern
-│   └── EmacsThemeConcern
+│   ├── EmacsThemeConcern
+│   └── PiThemeControlConcern
 ├── WarmthApplier                    (zbus to wl-gammarelay-rs Temperature)
 │   └── generation-cancelled ramp task owned by WarmthApplier
 ├── BrightnessApplier                (zbus to wl-gammarelay-rs Brightness)
@@ -136,7 +141,7 @@ on inotify push. Parses into a typed `Config`:
 ```
 (Config
   (Theme
-    (Concerns Terminal Desktop Ghostty Emacs)
+    (Concerns Terminal Desktop Ghostty Emacs Pi)
     (Palettes
       (Dark  (Base00 [#000000]) ... (Base0F [#ff5577]))
       (Light (Base00 [#faf5f0]) ... (Base0F [#cc3355])))
@@ -146,6 +151,10 @@ on inotify push. Parses into a typed `Config`:
     (GhosttyConfigTemplates
       (Dark <path-to-complete-dark-ghostty-config>)
       (Light <path-to-complete-light-ghostty-config>))
+    (PiThemeControl
+      (SocketPath (RuntimeRelative chroma/pi-live-theme.sock))
+      (ConnectTimeoutMillis 100)
+      (WriteTimeoutMillis 100))
     (Schedule …))
   (Warmth      (Schedule …))
   (Brightness  (Schedule …)))
@@ -215,6 +224,7 @@ boot hard-fails on mismatch.
 | Daemon ↔ disk (config + palettes) | NOTA text record (`Config`) |
 | Daemon ↔ Ghostty config templates | read-only Ghostty-native text files, copied byte-for-byte |
 | Daemon ↔ mutable Ghostty config | `$XDG_CONFIG_HOME/ghostty/config.ghostty` |
+| Daemon ↔ running Pi sessions | Unix-stream line frame (`dark\n` or `light\n`) at the configured socket |
 | Daemon ↔ wl-gammarelay-rs | zbus property writes (`Temperature` u16, `Brightness` f64) |
 | Daemon ↔ geoclue2 | bounded zbus system-bus location read |
 | Daemon ↔ theme concerns | typed Rust values; no apply-command schema |

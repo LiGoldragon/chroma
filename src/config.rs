@@ -5,12 +5,13 @@
 
 use core::fmt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::brightness::{BrightnessAxis, BrightnessLevel, BrightnessSchedule, BrightnessWaypoint};
 use crate::error::{Error, Result};
 use crate::theme::{
-    GhosttyConfigTemplates, ThemeAdapters, ThemeAxis, ThemeConcern, ThemeMode, ThemePalette, ThemePalettes,
-    ThemeSchedule, ThemeWaypoint,
+    GhosttyConfigTemplates, PiThemeControl, PiThemeControlSocket, ThemeAdapters, ThemeAxis, ThemeConcern, ThemeMode,
+    ThemePalette, ThemePalettes, ThemeSchedule, ThemeWaypoint,
 };
 use crate::time::{LocalHour, LocalMinute, RampDuration, RampTrigger, RelativeSolarOffset, SignedMinutes};
 use crate::warmth::{WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint};
@@ -291,6 +292,7 @@ fn parse_theme_axis(nodes: &[ConfigNode]) -> Result<ThemeAxis> {
         adapters: parse_theme_adapters(optional_record(nodes, "Adapters")?)?,
         font_point_size: parse_font_point_size(optional_record(nodes, "FontPointSize")?)?,
         ghostty_config_templates,
+        pi_theme_control: parse_pi_theme_control(optional_record(nodes, "PiThemeControl")?)?,
         schedule: parse_theme_schedule_ast(required_record(nodes, "Schedule")?)?,
     })
 }
@@ -357,6 +359,38 @@ fn parse_ghostty_config_templates(nodes: Option<&[ConfigNode]>) -> Result<Option
         dark: PathBuf::from(required_atom(required_record(nodes, "Dark")?, "Dark")?),
         light: PathBuf::from(required_atom(required_record(nodes, "Light")?, "Light")?),
     }))
+}
+
+fn parse_pi_theme_control(nodes: Option<&[ConfigNode]>) -> Result<Option<PiThemeControl>> {
+    let Some(nodes) = nodes else {
+        return Ok(None);
+    };
+    let socket = parse_pi_theme_control_socket(required_record(nodes, "SocketPath")?)?;
+    let connect_timeout = parse_optional_milliseconds(nodes, "ConnectTimeoutMillis", 100)?;
+    let write_timeout = parse_optional_milliseconds(nodes, "WriteTimeoutMillis", 100)?;
+    Ok(Some(PiThemeControl { socket, connect_timeout, write_timeout }))
+}
+
+fn parse_pi_theme_control_socket(nodes: &[ConfigNode]) -> Result<PiThemeControlSocket> {
+    if let Some(runtime_relative) = optional_record(nodes, "RuntimeRelative")? {
+        return Ok(PiThemeControlSocket::runtime_relative(PathBuf::from(required_atom(
+            runtime_relative,
+            "RuntimeRelative",
+        )?)));
+    }
+    Ok(PiThemeControlSocket::absolute(PathBuf::from(required_atom(nodes, "SocketPath")?)))
+}
+
+fn parse_optional_milliseconds(nodes: &[ConfigNode], name: &str, default: u64) -> Result<Duration> {
+    let Some(record) = optional_record(nodes, name)? else {
+        return Ok(Duration::from_millis(default));
+    };
+    let value = required_int(record, name)?;
+    if value > 0 && value <= u64::MAX as i128 {
+        Ok(Duration::from_millis(value as u64))
+    } else {
+        Err(Error::Config { message: format!("{name} expected a positive u64 millisecond count, got {value}") })
+    }
 }
 
 fn parse_font_point_size(nodes: Option<&[ConfigNode]>) -> Result<u8> {

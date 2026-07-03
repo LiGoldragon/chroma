@@ -8,12 +8,15 @@ use core::fmt;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration as StandardDuration;
 
 use kameo::actor::{Actor, ActorRef, Spawn, WeakActorRef};
 use kameo::error::{ActorStopReason, Infallible};
 use kameo::message::{Context, Message};
 use nota_next::{NotaDecode, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use tokio::io::AsyncWriteExt;
+use tokio::net::UnixStream;
 use tokio::time::{Duration, timeout};
 use zbus::zvariant::Value;
 
@@ -33,6 +36,14 @@ impl ThemeMode {
         match self {
             ThemeMode::Dark => "dark",
             ThemeMode::Light => "light",
+        }
+    }
+
+    /// Minimal line-protocol frame for live theme-control peers.
+    pub const fn pi_control_line(self) -> &'static str {
+        match self {
+            ThemeMode::Dark => "dark\n",
+            ThemeMode::Light => "light\n",
         }
     }
 
@@ -74,6 +85,8 @@ pub enum ThemeConcern {
     Ghostty,
     /// Running Emacs daemons.
     Emacs,
+    /// Running Pi sessions that expose in-process theme control.
+    Pi,
 }
 
 /// Read-only complete Ghostty config templates produced by the host profile.
@@ -92,6 +105,86 @@ impl GhosttyConfigTemplates {
     }
 }
 
+/// Runtime socket location for a live theme-control peer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PiThemeControlSocket {
+    /// Absolute Unix-stream socket path.
+    Absolute(PathBuf),
+    /// Path relative to `$XDG_RUNTIME_DIR`.
+    RuntimeRelative(PathBuf),
+}
+
+impl PiThemeControlSocket {
+    pub fn absolute(path: impl Into<PathBuf>) -> Self {
+        Self::Absolute(path.into())
+    }
+
+    pub fn runtime_relative(path: impl Into<PathBuf>) -> Self {
+        Self::RuntimeRelative(path.into())
+    }
+
+    fn path(&self) -> Result<PathBuf> {
+        match self {
+            Self::Absolute(path) => Ok(path.clone()),
+            Self::RuntimeRelative(path) => std::env::var_os("XDG_RUNTIME_DIR")
+                .map(PathBuf::from)
+                .map(|runtime_directory| runtime_directory.join(path))
+                .ok_or_else(|| Error::Config { message: "XDG_RUNTIME_DIR is not set for Pi theme control".into() }),
+        }
+    }
+}
+
+/// Unix-stream control target for running Pi theme updates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PiThemeControl {
+    pub socket: PiThemeControlSocket,
+    pub connect_timeout: StandardDuration,
+    pub write_timeout: StandardDuration,
+}
+
+impl PiThemeControl {
+    pub fn from_socket_path(path: impl Into<PathBuf>) -> Self {
+        Self {
+            socket: PiThemeControlSocket::absolute(path),
+            connect_timeout: StandardDuration::from_millis(100),
+            write_timeout: StandardDuration::from_millis(100),
+        }
+    }
+
+    pub fn runtime_default() -> Self {
+        Self {
+            socket: PiThemeControlSocket::runtime_relative("chroma/pi-live-theme.sock"),
+            connect_timeout: StandardDuration::from_millis(100),
+            write_timeout: StandardDuration::from_millis(100),
+        }
+    }
+
+    pub fn with_timeouts(mut self, connect_timeout: StandardDuration, write_timeout: StandardDuration) -> Self {
+        self.connect_timeout = connect_timeout;
+        self.write_timeout = write_timeout;
+        self
+    }
+
+    async fn send_mode(&self, mode: ThemeMode) -> Result<()> {
+        let path = self.socket.path()?;
+        let mut stream = match timeout(self.connect_timeout, UnixStream::connect(&path)).await {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(error)) => return Err(error.into()),
+            Err(_) => {
+                return Err(Error::Daemon {
+                    message: format!("Pi theme control connection to {} timed out", path.display()),
+                });
+            }
+        };
+        let line = mode.pi_control_line();
+        match timeout(self.write_timeout, stream.write_all(line.as_bytes())).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(error.into()),
+            Err(_) => Err(Error::Daemon { message: "Pi theme control write timed out".into() }),
+        }
+    }
+}
+
 impl ThemeConcern {
     pub fn from_config_name(name: &str) -> Result<Self> {
         match name {
@@ -99,6 +192,7 @@ impl ThemeConcern {
             "Desktop" | "Gtk" | "GTK" => Ok(Self::Desktop),
             "Ghostty" => Ok(Self::Ghostty),
             "Emacs" => Ok(Self::Emacs),
+            "Pi" => Ok(Self::Pi),
             "Legacy" | "ApplyCommand" | "ApplyTargets" => {
                 Err(Error::Config { message: format!("{name} belongs to the removed apply-command architecture") })
             }
@@ -112,6 +206,7 @@ impl ThemeConcern {
             Self::Desktop => "desktop",
             Self::Ghostty => "ghostty",
             Self::Emacs => "emacs",
+            Self::Pi => "pi",
         }
     }
 }
@@ -281,6 +376,7 @@ pub struct ThemeAxis {
     pub adapters: ThemeAdapters,
     pub font_point_size: u8,
     pub ghostty_config_templates: Option<GhosttyConfigTemplates>,
+    pub pi_theme_control: Option<PiThemeControl>,
     pub schedule: ThemeSchedule,
 }
 
@@ -323,6 +419,9 @@ impl ThemeApplier {
                 ThemeConcern::Emacs => ThemeConcernReference::Emacs(EmacsThemeConcern::spawn(EmacsThemeConcern {
                     adapters: axis.adapters.clone(),
                 })),
+                ThemeConcern::Pi => ThemeConcernReference::Pi(PiThemeControlConcern::spawn(PiThemeControlConcern {
+                    control: axis.pi_theme_control.clone().unwrap_or_else(PiThemeControl::runtime_default),
+                })),
             };
             concerns.push(reference);
         }
@@ -336,6 +435,7 @@ enum ThemeConcernReference {
     Desktop(ActorRef<DesktopThemeConcern>),
     Ghostty(ActorRef<GhosttyThemeConcern>),
     Emacs(ActorRef<EmacsThemeConcern>),
+    Pi(ActorRef<PiThemeControlConcern>),
 }
 
 impl ThemeConcernReference {
@@ -345,6 +445,7 @@ impl ThemeConcernReference {
             Self::Desktop(reference) => reference.tell(ApplyThemeConcern { mode }).await,
             Self::Ghostty(reference) => reference.tell(ApplyThemeConcern { mode }).await,
             Self::Emacs(reference) => reference.tell(ApplyThemeConcern { mode }).await,
+            Self::Pi(reference) => reference.tell(ApplyThemeConcern { mode }).await,
         }
         .map_err(|error| Error::ActorCall { message: error.to_string() })
     }
@@ -364,6 +465,10 @@ impl ThemeConcernReference {
                 reference.wait_for_shutdown().await;
             }
             Self::Emacs(reference) => {
+                let _ = reference.stop_gracefully().await;
+                reference.wait_for_shutdown().await;
+            }
+            Self::Pi(reference) => {
                 let _ = reference.stop_gracefully().await;
                 reference.wait_for_shutdown().await;
             }
@@ -596,6 +701,29 @@ impl GhosttyReloader {
         match timeout(Duration::from_secs(1), reload).await {
             Ok(result) => result,
             Err(_) => Err(Error::Daemon { message: "ghostty reload-config action timed out".into() }),
+        }
+    }
+}
+
+struct PiThemeControlConcern {
+    control: PiThemeControl,
+}
+
+impl Actor for PiThemeControlConcern {
+    type Args = Self;
+    type Error = Infallible;
+
+    async fn on_start(concern: Self::Args, _reference: ActorRef<Self>) -> std::result::Result<Self, Self::Error> {
+        Ok(concern)
+    }
+}
+
+impl Message<ApplyThemeConcern> for PiThemeControlConcern {
+    type Reply = ();
+
+    async fn handle(&mut self, message: ApplyThemeConcern, _context: &mut Context<Self, Self::Reply>) {
+        if let Err(error) = self.control.send_mode(message.mode).await {
+            eprintln!("chroma-daemon Pi theme control concern error: {error}");
         }
     }
 }

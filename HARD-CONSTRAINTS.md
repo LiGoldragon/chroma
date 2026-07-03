@@ -33,14 +33,18 @@ Chroma may persist terminal theme state for future shells. It
 must not scan `/dev/pts`, write OSC sequences to terminals, or
 trigger global terminal reload files from the daemon or CLI.
 Running terminals are not mutated automatically by `SetTheme`.
+Running Pi sessions receive theme changes only through the
+configured Pi Unix-stream concern; Chroma sends one bounded
+`dark\n` or `light\n` frame and treats a missing peer as log-only.
 Any future live terminal update path must be an explicit
 per-window protocol with bounded acknowledgement before the next
-window is touched.
+window is touched. The former Chroma `current-mode` sidecar remains
+outside the theme contract.
 
 Tests:
 
 - `hc_chroma_005_terminal_concern_does_not_broadcast_to_pty_inventory`
-- `hc_chroma_006_daemon_does_not_trigger_global_terminal_reload_files`
+- `hc_chroma_006_daemon_does_not_trigger_global_terminal_reload_files_or_pi_mode_sidecar`
 - `hc_chroma_007_cli_does_not_emit_live_terminal_palette_sequences`
 
 ## HC-CHROMA-005 — Kameo Actor Runtime, No Hand-Rolled Task Actors
