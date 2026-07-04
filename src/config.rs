@@ -10,8 +10,8 @@ use std::time::Duration;
 use crate::brightness::{BrightnessAxis, BrightnessLevel, BrightnessSchedule, BrightnessWaypoint};
 use crate::error::{Error, Result};
 use crate::theme::{
-    GhosttyConfigTemplates, PiThemeControl, PiThemeControlSocket, ThemeAdapters, ThemeAxis, ThemeConcern, ThemeMode,
-    ThemePalette, ThemePalettes, ThemeSchedule, ThemeWaypoint,
+    GhosttyConfigTemplates, PiThemeControl, PiThemeControlRegistryDirectory, ThemeAdapters, ThemeAxis, ThemeConcern,
+    ThemeMode, ThemePalette, ThemePalettes, ThemeSchedule, ThemeWaypoint,
 };
 use crate::time::{LocalHour, LocalMinute, RampDuration, RampTrigger, RelativeSolarOffset, SignedMinutes};
 use crate::warmth::{WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint};
@@ -365,20 +365,20 @@ fn parse_pi_theme_control(nodes: Option<&[ConfigNode]>) -> Result<Option<PiTheme
     let Some(nodes) = nodes else {
         return Ok(None);
     };
-    let socket = parse_pi_theme_control_socket(required_record(nodes, "SocketPath")?)?;
+    let registry_directory = parse_pi_theme_control_registry_directory(required_record(nodes, "RegistryDirectory")?)?;
     let connect_timeout = parse_optional_milliseconds(nodes, "ConnectTimeoutMillis", 100)?;
     let write_timeout = parse_optional_milliseconds(nodes, "WriteTimeoutMillis", 100)?;
-    Ok(Some(PiThemeControl { socket, connect_timeout, write_timeout }))
+    Ok(Some(PiThemeControl { registry_directory, connect_timeout, write_timeout }))
 }
 
-fn parse_pi_theme_control_socket(nodes: &[ConfigNode]) -> Result<PiThemeControlSocket> {
+fn parse_pi_theme_control_registry_directory(nodes: &[ConfigNode]) -> Result<PiThemeControlRegistryDirectory> {
     if let Some(runtime_relative) = optional_record(nodes, "RuntimeRelative")? {
-        return Ok(PiThemeControlSocket::runtime_relative(PathBuf::from(required_atom(
+        return Ok(PiThemeControlRegistryDirectory::runtime_relative(PathBuf::from(required_atom(
             runtime_relative,
             "RuntimeRelative",
         )?)));
     }
-    Ok(PiThemeControlSocket::absolute(PathBuf::from(required_atom(nodes, "SocketPath")?)))
+    Ok(PiThemeControlRegistryDirectory::absolute(PathBuf::from(required_atom(nodes, "RegistryDirectory")?)))
 }
 
 fn parse_optional_milliseconds(nodes: &[ConfigNode], name: &str, default: u64) -> Result<Duration> {

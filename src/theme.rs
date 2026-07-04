@@ -6,6 +6,7 @@
 
 use core::fmt;
 use std::collections::HashMap;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration as StandardDuration;
@@ -105,16 +106,16 @@ impl GhosttyConfigTemplates {
     }
 }
 
-/// Runtime socket location for a live theme-control peer.
+/// Runtime registry directory for live Pi theme-control peers.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PiThemeControlSocket {
-    /// Absolute Unix-stream socket path.
+pub enum PiThemeControlRegistryDirectory {
+    /// Absolute registry directory path.
     Absolute(PathBuf),
-    /// Path relative to `$XDG_RUNTIME_DIR`.
+    /// Directory path relative to `$XDG_RUNTIME_DIR`.
     RuntimeRelative(PathBuf),
 }
 
-impl PiThemeControlSocket {
+impl PiThemeControlRegistryDirectory {
     pub fn absolute(path: impl Into<PathBuf>) -> Self {
         Self::Absolute(path.into())
     }
@@ -134,18 +135,85 @@ impl PiThemeControlSocket {
     }
 }
 
-/// Unix-stream control target for running Pi theme updates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PiThemeControlRegistryEntry {
+    entry_path: PathBuf,
+    socket_path: PathBuf,
+}
+
+impl PiThemeControlRegistryEntry {
+    fn from_file(entry_path: PathBuf, contents: String) -> Option<Self> {
+        let socket_path = contents.trim();
+        if socket_path.is_empty() {
+            return None;
+        }
+        Some(Self { entry_path, socket_path: PathBuf::from(socket_path) })
+    }
+
+    fn has_registry_extension(path: &Path) -> bool {
+        path.extension().is_some_and(|extension| extension == "path")
+    }
+
+    fn is_stale_connect_error(error: &std::io::Error) -> bool {
+        matches!(error.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused)
+    }
+
+    async fn remove_registration(&self) {
+        if let Err(error) = tokio::fs::remove_file(&self.entry_path).await {
+            if error.kind() != ErrorKind::NotFound {
+                eprintln!(
+                    "chroma-daemon Pi theme control could not remove stale registry entry {}: {error}",
+                    self.entry_path.display()
+                );
+            }
+        }
+    }
+
+    async fn send_line(&self, line: &str, connect_timeout: StandardDuration, write_timeout: StandardDuration) {
+        let mut stream = match timeout(connect_timeout, UnixStream::connect(&self.socket_path)).await {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(error)) => {
+                if Self::is_stale_connect_error(&error) {
+                    self.remove_registration().await;
+                } else {
+                    eprintln!(
+                        "chroma-daemon Pi theme control connection to {} failed: {error}",
+                        self.socket_path.display()
+                    );
+                }
+                return;
+            }
+            Err(_) => {
+                eprintln!("chroma-daemon Pi theme control connection to {} timed out", self.socket_path.display());
+                return;
+            }
+        };
+        match timeout(write_timeout, stream.write_all(line.as_bytes())).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                if Self::is_stale_connect_error(&error) {
+                    self.remove_registration().await;
+                } else {
+                    eprintln!("chroma-daemon Pi theme control write to {} failed: {error}", self.socket_path.display());
+                }
+            }
+            Err(_) => eprintln!("chroma-daemon Pi theme control write to {} timed out", self.socket_path.display()),
+        }
+    }
+}
+
+/// Registry of Unix-stream control targets for running Pi theme updates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PiThemeControl {
-    pub socket: PiThemeControlSocket,
+    pub registry_directory: PiThemeControlRegistryDirectory,
     pub connect_timeout: StandardDuration,
     pub write_timeout: StandardDuration,
 }
 
 impl PiThemeControl {
-    pub fn from_socket_path(path: impl Into<PathBuf>) -> Self {
+    pub fn from_registry_directory(path: impl Into<PathBuf>) -> Self {
         Self {
-            socket: PiThemeControlSocket::absolute(path),
+            registry_directory: PiThemeControlRegistryDirectory::absolute(path),
             connect_timeout: StandardDuration::from_millis(100),
             write_timeout: StandardDuration::from_millis(100),
         }
@@ -153,7 +221,7 @@ impl PiThemeControl {
 
     pub fn runtime_default() -> Self {
         Self {
-            socket: PiThemeControlSocket::runtime_relative("chroma/pi-live-theme.sock"),
+            registry_directory: PiThemeControlRegistryDirectory::runtime_relative("chroma/pi-live-theme.d"),
             connect_timeout: StandardDuration::from_millis(100),
             write_timeout: StandardDuration::from_millis(100),
         }
@@ -166,22 +234,40 @@ impl PiThemeControl {
     }
 
     async fn send_mode(&self, mode: ThemeMode) -> Result<()> {
-        let path = self.socket.path()?;
-        let mut stream = match timeout(self.connect_timeout, UnixStream::connect(&path)).await {
-            Ok(Ok(stream)) => stream,
-            Ok(Err(error)) => return Err(error.into()),
-            Err(_) => {
-                return Err(Error::Daemon {
-                    message: format!("Pi theme control connection to {} timed out", path.display()),
-                });
-            }
-        };
         let line = mode.pi_control_line();
-        match timeout(self.write_timeout, stream.write_all(line.as_bytes())).await {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(error)) => Err(error.into()),
-            Err(_) => Err(Error::Daemon { message: "Pi theme control write timed out".into() }),
+        for entry in self.registry_entries().await? {
+            entry.send_line(line, self.connect_timeout, self.write_timeout).await;
         }
+        Ok(())
+    }
+
+    async fn registry_entries(&self) -> Result<Vec<PiThemeControlRegistryEntry>> {
+        let directory = self.registry_directory.path()?;
+        let mut entries = match tokio::fs::read_dir(&directory).await {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+        let mut registry_entries = Vec::new();
+        while let Some(directory_entry) = entries.next_entry().await? {
+            let entry_path = directory_entry.path();
+            if !PiThemeControlRegistryEntry::has_registry_extension(&entry_path) {
+                continue;
+            }
+            match tokio::fs::read_to_string(&entry_path).await {
+                Ok(contents) => {
+                    if let Some(entry) = PiThemeControlRegistryEntry::from_file(entry_path, contents) {
+                        registry_entries.push(entry);
+                    }
+                }
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) => eprintln!(
+                    "chroma-daemon Pi theme control could not read registry entry {}: {error}",
+                    entry_path.display()
+                ),
+            }
+        }
+        Ok(registry_entries)
     }
 }
 

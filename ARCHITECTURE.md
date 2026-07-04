@@ -69,9 +69,11 @@ returns `Accepted` immediately after those actors own the
 message. The terminal concern persists state for future shells
 only; it never scans PTYs, writes to other terminals, or forces a
 global terminal reload. The Pi concern pushes one minimal line
-frame (`dark\n` or `light\n`) to the configured Unix-stream socket;
-connection failures and short timeout failures are logged by that
-concern and do not fail the theme switch. Ghostty is a native
+frame (`dark\n` or `light\n`) to each Unix-stream socket registered
+under the configured runtime registry directory; stale registry entries
+are removed on missing or refused sockets, and connection failures or
+short timeout failures are logged by that concern without failing the
+theme switch. Ghostty is a native
 application concern:
 Chroma reads the complete Ghostty config template for the target
 mode, copies it to the mutable `config.ghostty` file under the
@@ -152,7 +154,7 @@ on inotify push. Parses into a typed `Config`:
       (Dark <path-to-complete-dark-ghostty-config>)
       (Light <path-to-complete-light-ghostty-config>))
     (PiThemeControl
-      (SocketPath (RuntimeRelative chroma/pi-live-theme.sock))
+      (RegistryDirectory (RuntimeRelative chroma/pi-live-theme.d))
       (ConnectTimeoutMillis 100)
       (WriteTimeoutMillis 100))
     (Schedule …))

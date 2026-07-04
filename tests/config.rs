@@ -1,6 +1,6 @@
 use chroma::{
-    BrightnessSchedule, ConfigFile, PiThemeControlSocket, RampTrigger, ThemeConcern, ThemeMode, ThemeSchedule,
-    WarmthLevel, WarmthSchedule,
+    BrightnessSchedule, ConfigFile, PiThemeControlRegistryDirectory, RampTrigger, ThemeConcern, ThemeMode,
+    ThemeSchedule, WarmthLevel, WarmthSchedule,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -71,21 +71,24 @@ fn config_file_decodes_manual_theme_schedule_from_nota_config() {
 }
 
 #[test]
-fn config_file_decodes_pi_theme_control_socket_and_timeouts() {
+fn config_file_decodes_pi_theme_control_registry_directory_and_timeouts() {
     let fixture = Fixture::new();
     let config = fixture.write_config(&NATIVE_CONFIG.replace(
         "(Concerns Terminal Desktop Ghostty)",
         "(Concerns Terminal Desktop Ghostty Pi)",
     ).replace(
         "    (GhosttyConfigTemplates\n      (Dark /tmp/chroma-test/dark.ghostty)\n      (Light /tmp/chroma-test/light.ghostty))\n",
-        "    (GhosttyConfigTemplates\n      (Dark /tmp/chroma-test/dark.ghostty)\n      (Light /tmp/chroma-test/light.ghostty))\n    (PiThemeControl\n      (SocketPath (RuntimeRelative chroma/pi-live-theme.sock))\n      (ConnectTimeoutMillis 25)\n      (WriteTimeoutMillis 50))\n",
+        "    (GhosttyConfigTemplates\n      (Dark /tmp/chroma-test/dark.ghostty)\n      (Light /tmp/chroma-test/light.ghostty))\n    (PiThemeControl\n      (RegistryDirectory (RuntimeRelative chroma/pi-live-theme.d))\n      (ConnectTimeoutMillis 25)\n      (WriteTimeoutMillis 50))\n",
     ));
 
     let theme = ConfigFile::from_path(config).theme_axis().expect("theme axis decodes");
 
     assert!(theme.concerns.contains(&ThemeConcern::Pi));
     let control = theme.pi_theme_control.expect("Pi theme control config decodes");
-    assert_eq!(control.socket, PiThemeControlSocket::runtime_relative(PathBuf::from("chroma/pi-live-theme.sock")));
+    assert_eq!(
+        control.registry_directory,
+        PiThemeControlRegistryDirectory::runtime_relative(PathBuf::from("chroma/pi-live-theme.d"))
+    );
     assert_eq!(control.connect_timeout.as_millis(), 25);
     assert_eq!(control.write_timeout.as_millis(), 50);
 }

@@ -4,6 +4,8 @@ use chroma::{
 };
 use kameo::actor::ActorRef;
 use nota_next::{NotaDecode, NotaEncode, NotaSource};
+use std::fs;
+use std::path::{Path, PathBuf};
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixListener;
 use tokio::time::{Duration, timeout};
@@ -25,8 +27,24 @@ impl ThemeApplierFixture {
         Self { temporary_directory: tempfile::tempdir().expect("create tempdir") }
     }
 
-    fn socket_path(&self) -> std::path::PathBuf {
-        self.temporary_directory.path().join("pi-live-theme.sock")
+    fn registry_directory(&self) -> PathBuf {
+        self.temporary_directory.path().join("pi-live-theme.d")
+    }
+
+    fn socket_path(&self, name: &str) -> PathBuf {
+        self.registry_directory().join(format!("{name}.sock"))
+    }
+
+    fn registry_entry_path(&self, name: &str) -> PathBuf {
+        self.registry_directory().join(format!("{name}.path"))
+    }
+
+    fn register_socket(&self, name: &str, socket_path: &Path) -> PathBuf {
+        let registry_entry_path = self.registry_entry_path(name);
+        fs::create_dir_all(self.registry_directory()).expect("create Pi theme control registry directory");
+        fs::write(&registry_entry_path, format!("{}\n", socket_path.display()))
+            .expect("write Pi theme control registry entry");
+        registry_entry_path
     }
 
     fn pi_axis(&self) -> ThemeAxis {
@@ -40,7 +58,7 @@ impl ThemeApplierFixture {
             adapters: ThemeAdapters::default(),
             font_point_size: 12,
             ghostty_config_templates: None,
-            pi_theme_control: Some(PiThemeControl::from_socket_path(self.socket_path())),
+            pi_theme_control: Some(PiThemeControl::from_registry_directory(self.registry_directory())),
             schedule: ThemeSchedule::Manual(ThemeMode::Dark),
         }
     }
@@ -94,35 +112,56 @@ fn nota_encodes_as_pascal_variant_name() {
 }
 
 #[tokio::test]
-async fn pi_theme_control_sends_dark_and_light_line_events() {
+async fn pi_theme_control_sends_theme_line_event_to_each_registered_socket() {
     let fixture = ThemeApplierFixture::new();
-    let listener = UnixListener::bind(fixture.socket_path()).expect("bind Pi theme control listener");
+    fs::create_dir_all(fixture.registry_directory()).expect("create Pi theme control registry directory");
+    let first_socket_path = fixture.socket_path("first");
+    let second_socket_path = fixture.socket_path("second");
+    let first_listener = UnixListener::bind(&first_socket_path).expect("bind first Pi theme control listener");
+    let second_listener = UnixListener::bind(&second_socket_path).expect("bind second Pi theme control listener");
+    fixture.register_socket("first", &first_socket_path);
+    fixture.register_socket("second", &second_socket_path);
     let applier = ThemeApplier::start(fixture.pi_axis()).await;
 
     fixture.apply_theme(&applier, ThemeMode::Dark).await;
-    fixture.apply_theme(&applier, ThemeMode::Light).await;
 
-    let mut received = Vec::new();
-    for _ in 0..2 {
-        let (mut stream, _) = timeout(Duration::from_secs(1), listener.accept())
-            .await
-            .expect("listener receives connection")
-            .expect("accept connection");
-        let mut message = String::new();
-        timeout(Duration::from_secs(1), stream.read_to_string(&mut message))
-            .await
-            .expect("read Pi theme control message")
-            .expect("read connection");
-        received.push(message);
-    }
+    let received = timeout(Duration::from_secs(1), async {
+        tokio::join!(read_single_theme_message(first_listener), read_single_theme_message(second_listener))
+    })
+    .await
+    .expect("both Pi sessions receive theme control messages");
 
-    assert_eq!(received, vec!["dark\n", "light\n"]);
+    assert_eq!(received, ("dark\n".to_string(), "dark\n".to_string()));
     let _ = applier.stop_gracefully().await;
     applier.wait_for_shutdown().await;
 }
 
 #[tokio::test]
-async fn missing_pi_theme_control_socket_is_non_fatal_for_theme_apply() {
+async fn stale_pi_theme_control_registry_entry_is_cleaned_without_failing_theme_apply() {
+    let fixture = ThemeApplierFixture::new();
+    let missing_socket_path = fixture.socket_path("missing");
+    let stale_entry_path = fixture.register_socket("missing", &missing_socket_path);
+    let applier = ThemeApplier::start(fixture.pi_axis()).await;
+
+    fixture.apply_theme(&applier, ThemeMode::Light).await;
+
+    timeout(Duration::from_secs(1), async {
+        loop {
+            if !stale_entry_path.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("stale Pi theme control registry entry is removed");
+
+    let _ = applier.stop_gracefully().await;
+    applier.wait_for_shutdown().await;
+}
+
+#[tokio::test]
+async fn missing_pi_theme_control_registry_directory_is_non_fatal_for_theme_apply() {
     let fixture = ThemeApplierFixture::new();
     let applier = ThemeApplier::start(fixture.pi_axis()).await;
 
@@ -130,6 +169,13 @@ async fn missing_pi_theme_control_socket_is_non_fatal_for_theme_apply() {
 
     let _ = applier.stop_gracefully().await;
     applier.wait_for_shutdown().await;
+}
+
+async fn read_single_theme_message(listener: UnixListener) -> String {
+    let (mut stream, _) = listener.accept().await.expect("accept connection");
+    let mut message = String::new();
+    stream.read_to_string(&mut message).await.expect("read Pi theme control message");
+    message
 }
 
 #[test]
