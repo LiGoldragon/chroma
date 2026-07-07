@@ -1,8 +1,5 @@
 # Agent instructions — chroma
 
-You **MUST** read `~/primary/AGENTS.md` and `lore/AGENTS.md` —
-the workspace contract.
-
 ## Repo role
 
 Chroma is the **unified visual-state daemon** for the desktop:
@@ -39,11 +36,11 @@ It replaces darkman + the `nightshift-*` systemd services + the
   wl-gammarelay-rs. Geoclue is read only when civil triggers need
   a location and retried by bounded delayed actor message if it
   is unavailable. There is no `loop { check_time(); sleep(N); }`
-  anywhere. See `~/primary/skills/push-not-pull.md`.
+  anywhere. See the push-not-pull discipline.
 - **rkyv on the wire, NOTA at the human boundary.** Daemon ↔
   CLI is rkyv-archived `Request` / `Response` frames
   on a Unix socket (the canonical signal pattern from
-  `~/primary/repos/signal`). The CLI parses NOTA argv into the
+  the `signal` repository). The CLI parses NOTA argv into the
   typed request, archives it, and prints the rkyv-deserialised
   reply as NOTA. The daemon never re-parses NOTA from the CLI.
 - **NOTA-only data inputs.** Chroma config and palette data are
@@ -52,18 +49,18 @@ It replaces darkman + the `nightshift-*` systemd services + the
   `$XDG_STATE_HOME/chroma/state.redb`. Values are rkyv-archived
   domain records. State is read on boot and re-applied to
   hardware so resume / login / wake never drifts. See
-  `~/primary/skills/rust-discipline.md` §"redb + rkyv".
+  the Rust discipline §"redb + rkyv".
 - **Kameo for stateful components.** Each running concern is a
   Kameo actor with typed per-kind messages. State is owned by
   the actor, not shared through locks. The runtime root owns the
   topology; concern actors never rebuild actor semantics with
   raw tasks, unbounded channels, or shared mutexes. See
-  `~/primary/skills/kameo.md` and
-  `~/primary/skills/actor-systems.md`.
+  the Kameo discipline and
+  the actor-system discipline.
 
 ## Style
 
-Per `~/primary/skills/rust-discipline.md`:
+Per the Rust discipline:
 
 - Methods on types, not free functions.
 - Domain values are typed (newtypes; private fields).
@@ -71,15 +68,15 @@ Per `~/primary/skills/rust-discipline.md`:
 - Errors as a typed `Error` enum per crate via `thiserror`.
 - Tests live in `tests/`, one file per module exercised.
 - Full English words for identifiers (per
-  `~/primary/skills/naming.md`).
+  the naming discipline).
 
-Beauty is the criterion (per `~/primary/skills/beauty.md`):
+Beauty is the criterion (per the design-quality discipline):
 ugliness is a diagnostic reading; slow down and find the
 structure that makes it beautiful.
 
 ## Version control
 
-`jj` (Jujutsu), per `~/primary/skills/jj.md`. Standard flow:
+`jj` (Jujutsu), per the Jujutsu discipline. Standard flow:
 
 ```sh
 jj commit -m '<short verb + scope>' \
@@ -92,14 +89,13 @@ prompts (always `-m '<msg>'`).
 
 ## See also
 
-- `~/primary/AGENTS.md` — the workspace agent contract.
-- `~/primary/skills/rust-discipline.md` — Rust style and shape.
-- `~/primary/skills/push-not-pull.md` — subscription discipline.
-- `~/primary/skills/abstractions.md` — verb-belongs-to-noun.
-- `~/primary/skills/beauty.md` — beauty as criterion.
-- `~/primary/skills/kameo.md` — Kameo actor runtime.
-- `~/primary/skills/actor-systems.md` — actor-system discipline.
+- the Rust discipline — Rust style and shape.
+- the push-not-pull discipline — subscription discipline.
+- the abstractions discipline — verb-belongs-to-noun.
+- the design-quality discipline — beauty as criterion.
+- the Kameo discipline — Kameo actor runtime.
+- the actor-system discipline — actor-system discipline.
 - `lore/rust/rkyv.md` — wire format discipline.
 - `HARD-CONSTRAINTS.md` — architecture locks and matching tests.
-- `~/primary/repos/signal` — canonical signal pattern reference.
-- `~/primary/repos/lojix` — typed NOTA client shape.
+- the `signal` repository — canonical signal pattern reference.
+- the `lojix` repository — typed NOTA client shape.
