@@ -137,6 +137,27 @@ async fn pi_theme_control_sends_theme_line_event_to_each_registered_socket() {
 }
 
 #[tokio::test]
+async fn pi_registration_receives_current_mode_after_chroma_changed_with_no_peers() {
+    let fixture = ThemeApplierFixture::new();
+    let applier = ThemeApplier::start(fixture.pi_axis()).await;
+
+    fixture.apply_theme(&applier, ThemeMode::Dark).await;
+
+    fs::create_dir_all(fixture.registry_directory()).expect("create Pi theme control registry directory");
+    let socket_path = fixture.socket_path("late-pi");
+    let listener = UnixListener::bind(&socket_path).expect("bind late Pi listener");
+    fixture.register_socket("late-pi", &socket_path);
+
+    let received = timeout(Duration::from_secs(1), read_single_theme_message(listener))
+        .await
+        .expect("late Pi registration receives the current Chroma mode");
+
+    assert_eq!(received, "dark\n");
+    let _ = applier.stop_gracefully().await;
+    applier.wait_for_shutdown().await;
+}
+
+#[tokio::test]
 async fn stale_pi_theme_control_registry_entry_is_cleaned_without_failing_theme_apply() {
     let fixture = ThemeApplierFixture::new();
     let missing_socket_path = fixture.socket_path("missing");

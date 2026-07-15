@@ -15,6 +15,7 @@ use kameo::actor::{Actor, ActorRef, Spawn, WeakActorRef};
 use kameo::error::{ActorStopReason, Infallible};
 use kameo::message::{Context, Message};
 use nota::{NotaDecode, NotaEncode};
+use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher, recommended_watcher};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
@@ -478,6 +479,12 @@ impl ThemeApplier {
         reference
     }
 
+    async fn wait_for_concerns(&self) {
+        for concern in &self.concerns {
+            concern.wait_for_startup().await;
+        }
+    }
+
     fn from_axis(axis: ThemeAxis) -> Self {
         let mut concerns = Vec::new();
         for concern in axis.concerns {
@@ -507,6 +514,9 @@ impl ThemeApplier {
                 })),
                 ThemeConcern::Pi => ThemeConcernReference::Pi(PiThemeControlConcern::spawn(PiThemeControlConcern {
                     control: axis.pi_theme_control.clone().unwrap_or_else(PiThemeControl::runtime_default),
+                    current_mode: None,
+                    registry_watcher: None,
+                    registry_generation: 0,
                 })),
             };
             concerns.push(reference);
@@ -525,6 +535,16 @@ enum ThemeConcernReference {
 }
 
 impl ThemeConcernReference {
+    async fn wait_for_startup(&self) {
+        match self {
+            Self::Terminal(reference) => reference.wait_for_startup().await,
+            Self::Desktop(reference) => reference.wait_for_startup().await,
+            Self::Ghostty(reference) => reference.wait_for_startup().await,
+            Self::Emacs(reference) => reference.wait_for_startup().await,
+            Self::Pi(reference) => reference.wait_for_startup().await,
+        }
+    }
+
     async fn apply(&self, mode: ThemeMode) -> Result<()> {
         match self {
             Self::Terminal(reference) => reference.tell(ApplyThemeConcern { mode }).await,
@@ -567,7 +587,9 @@ impl Actor for ThemeApplier {
     type Error = Infallible;
 
     async fn on_start(axis: Self::Args, _reference: ActorRef<Self>) -> std::result::Result<Self, Self::Error> {
-        Ok(Self::from_axis(axis))
+        let applier = Self::from_axis(axis);
+        applier.wait_for_concerns().await;
+        Ok(applier)
     }
 
     async fn on_stop(
@@ -793,13 +815,52 @@ impl GhosttyReloader {
 
 struct PiThemeControlConcern {
     control: PiThemeControl,
+    current_mode: Option<ThemeMode>,
+    registry_watcher: Option<RecommendedWatcher>,
+    registry_generation: u64,
+}
+
+impl PiThemeControlConcern {
+    const INITIAL_SNAPSHOT_DELAY: Duration = Duration::from_millis(25);
+
+    fn watch_registry(&self, actor: ActorRef<Self>) -> Result<RecommendedWatcher> {
+        let registry_directory = self.control.registry_directory.path()?;
+        std::fs::create_dir_all(&registry_directory)?;
+        let mut watcher = recommended_watcher(move |event: notify::Result<Event>| match event {
+            Ok(event) if Self::registration_event_touches(&event) => {
+                let _ = actor.tell(PiThemeRegistryChanged).try_send();
+            }
+            Ok(_) => {}
+            Err(error) => eprintln!("chroma-daemon Pi theme registry watcher error: {error}"),
+        })?;
+        watcher.watch(&registry_directory, RecursiveMode::NonRecursive)?;
+        Ok(watcher)
+    }
+
+    fn registration_event_touches(event: &Event) -> bool {
+        !matches!(event.kind, EventKind::Access(_))
+            && event.paths.iter().any(|path| PiThemeControlRegistryEntry::has_registry_extension(path))
+    }
+
+    async fn send_initial_snapshot(&self) {
+        let Some(mode) = self.current_mode else {
+            return;
+        };
+        if let Err(error) = self.control.send_mode(mode).await {
+            eprintln!("chroma-daemon Pi theme initial snapshot error: {error}");
+        }
+    }
 }
 
 impl Actor for PiThemeControlConcern {
     type Args = Self;
     type Error = Infallible;
 
-    async fn on_start(concern: Self::Args, _reference: ActorRef<Self>) -> std::result::Result<Self, Self::Error> {
+    async fn on_start(mut concern: Self::Args, reference: ActorRef<Self>) -> std::result::Result<Self, Self::Error> {
+        match concern.watch_registry(reference) {
+            Ok(watcher) => concern.registry_watcher = Some(watcher),
+            Err(error) => eprintln!("chroma-daemon Pi theme registry watcher start error: {error}"),
+        }
         Ok(concern)
     }
 }
@@ -808,8 +869,37 @@ impl Message<ApplyThemeConcern> for PiThemeControlConcern {
     type Reply = ();
 
     async fn handle(&mut self, message: ApplyThemeConcern, _context: &mut Context<Self, Self::Reply>) {
+        self.current_mode = Some(message.mode);
         if let Err(error) = self.control.send_mode(message.mode).await {
             eprintln!("chroma-daemon Pi theme control concern error: {error}");
+        }
+    }
+}
+
+struct PiThemeRegistryChanged;
+
+impl Message<PiThemeRegistryChanged> for PiThemeControlConcern {
+    type Reply = ();
+
+    async fn handle(&mut self, _message: PiThemeRegistryChanged, context: &mut Context<Self, Self::Reply>) {
+        self.registry_generation = self.registry_generation.saturating_add(1);
+        let _snapshot = context
+            .actor_ref()
+            .tell(DeliverPiThemeInitialSnapshot { generation: self.registry_generation })
+            .send_after(Self::INITIAL_SNAPSHOT_DELAY);
+    }
+}
+
+struct DeliverPiThemeInitialSnapshot {
+    generation: u64,
+}
+
+impl Message<DeliverPiThemeInitialSnapshot> for PiThemeControlConcern {
+    type Reply = ();
+
+    async fn handle(&mut self, message: DeliverPiThemeInitialSnapshot, _context: &mut Context<Self, Self::Reply>) {
+        if message.generation == self.registry_generation {
+            self.send_initial_snapshot().await;
         }
     }
 }
