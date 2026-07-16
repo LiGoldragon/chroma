@@ -38,6 +38,25 @@ async fn delayed_location_updated_delivers_non_root_path_before_location_propert
     assert_ne!(path.as_str(), "/");
 }
 
+#[tokio::test]
+async fn renewal_subscription_can_advance_from_cached_fix_to_provider_replacement() {
+    let updates = stream::iter([
+        Ok(location_update("/org/freedesktop/GeoClue2/Location/cached")),
+        Ok(location_update("/org/freedesktop/GeoClue2/Location/replacement")),
+    ]);
+    let mut awaiter = GeoclueLocationUpdateAwaiter::new(updates);
+
+    assert!(awaiter.location_path().await.expect("cached delivery is readable").as_str().ends_with("/cached"));
+    assert!(
+        awaiter
+            .location_path()
+            .await
+            .expect("the live subscription remains open for a replacement")
+            .as_str()
+            .ends_with("/replacement")
+    );
+}
+
 #[test]
 fn root_location_update_is_rejected_before_any_location_property_read() {
     let error = location_update("/").location_path().expect_err("root path is GeoClue's unavailable sentinel");

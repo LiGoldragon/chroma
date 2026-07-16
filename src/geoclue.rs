@@ -103,6 +103,12 @@ impl FreshLocationLease {
         self.held = Some(replacement);
     }
 
+    /// Whether this actor has ever held a validated fix. An expired lease is
+    /// still reason to use the short recovery retry rather than cold-start cadence.
+    pub fn has_held(self) -> bool {
+        self.held.is_some()
+    }
+
     /// Return the held fix through its actual expiry instant.
     pub fn current_at(self, now: SystemTime) -> Option<FreshGeoclueLocation> {
         self.held.filter(|location| location.is_current_at(now))

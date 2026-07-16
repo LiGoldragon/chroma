@@ -42,7 +42,10 @@ use crate::time::RampDuration;
 use crate::warmth::KelvinTemperature;
 use crate::wire::{read_frame, socket_path, write_frame};
 
-const GEOCLUE_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+// Renewal begins two minutes before expiry and keeps the GeoClue client alive
+// long enough to receive the provider's next physical fix instead of repeatedly
+// consuming and discarding the same cached LocationUpdated value.
+const GEOCLUE_REQUEST_TIMEOUT: Duration = Duration::from_secs(135);
 const POST_RESUME_LOCATION_REFRESH_DELAY: Duration = Duration::from_secs(5);
 // A stale GeoClue cache may outlive an otherwise valid held location. Retry
 // well inside the renewal margin while retaining that held fix until expiry.
@@ -1014,7 +1017,7 @@ impl ScheduleEngine {
                 eprintln!("chroma-daemon recomputed solar schedule from fresh GeoClue location");
             }
             None => {
-                let retry_delay = if self.location_lease.current_at(std::time::SystemTime::now()).is_some() {
+                let retry_delay = if self.location_lease.has_held() {
                     LOCATION_RENEWAL_RETRY_DELAY
                 } else {
                     LOCATION_UNAVAILABLE_RETRY_DELAY
@@ -1177,22 +1180,42 @@ impl GeoclueLocator {
         let mut location_updates = GeoclueLocationUpdateAwaiter::new(updates);
         let result = async {
             let _: () = client.call("Start", &()).await?;
-            let location_path = location_updates.location_path().await?;
-            let location = zbus::Proxy::new(
-                &self.connection,
-                "org.freedesktop.GeoClue2",
-                location_path,
-                "org.freedesktop.GeoClue2.Location",
-            )
-            .await?;
-            let latitude: f64 = location.get_property("Latitude").await?;
-            let longitude: f64 = location.get_property("Longitude").await?;
-            let accuracy_meters: f64 = location.get_property("Accuracy").await?;
-            let timestamp: (u64, u64) = location.get_property("Timestamp").await?;
-            let location = GeoclueLocationFix::new(Location { latitude, longitude }, accuracy_meters, timestamp)
-                .location_at(std::time::SystemTime::now())?;
-            eprintln!("chroma-daemon accepted fresh GeoClue location (accuracy: {:.0}m)", accuracy_meters);
-            Ok(location)
+            loop {
+                let location_path = location_updates.location_path().await?;
+                let location = zbus::Proxy::new(
+                    &self.connection,
+                    "org.freedesktop.GeoClue2",
+                    location_path,
+                    "org.freedesktop.GeoClue2.Location",
+                )
+                .await?;
+                let latitude: f64 = location.get_property("Latitude").await?;
+                let longitude: f64 = location.get_property("Longitude").await?;
+                let accuracy_meters: f64 = location.get_property("Accuracy").await?;
+                let timestamp: (u64, u64) = location.get_property("Timestamp").await?;
+                match GeoclueLocationFix::new(Location { latitude, longitude }, accuracy_meters, timestamp)
+                    .location_at(std::time::SystemTime::now())
+                {
+                    Ok(location) => {
+                        eprintln!(
+                            "chroma-daemon accepted fresh GeoClue location (accuracy: {:.0}m)",
+                            accuracy_meters
+                        );
+                        break Ok(location);
+                    }
+                    Err(Error::GeoclueLocationExpiresSoon { remaining_seconds }) => {
+                        eprintln!(
+                            "chroma-daemon retained held location while cached GeoClue fix had {remaining_seconds}s remaining"
+                        );
+                    }
+                    Err(Error::GeoclueLocationStale { age_seconds }) => {
+                        eprintln!(
+                            "chroma-daemon retained held location while cached GeoClue fix was {age_seconds}s old"
+                        );
+                    }
+                    Err(error) => break Err(error),
+                }
+            }
         }
         .await;
         let _: std::result::Result<(), zbus::Error> = client.call("Stop", &()).await;

@@ -187,7 +187,7 @@ fn hc_chroma_018_stale_location_refresh_retries_with_a_held_location() {
     let geoclue_source = include_str!("../src/geoclue.rs");
 
     assert!(daemon_source.contains("const LOCATION_RENEWAL_RETRY_DELAY: Duration = Duration::from_secs(10);"));
-    assert!(daemon_source.contains("self.location_lease.current_at(std::time::SystemTime::now()).is_some()"));
+    assert!(daemon_source.contains("self.location_lease.has_held()"));
     assert!(daemon_source.contains("self.location_lease.renew(fresh_location);"));
     assert!(geoclue_source.contains("pub struct FreshLocationLease"));
     assert!(geoclue_source.contains("self.held.filter(|location| location.is_current_at(now))"));
