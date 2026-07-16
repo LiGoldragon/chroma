@@ -26,6 +26,7 @@ use crate::brightness::BrightnessPercent;
 use crate::config::{Config, ConfigFile};
 use crate::error::{Error, Result};
 use crate::gamma::GammaClient;
+use crate::geoclue::{GeoclueLocationFix, GeoclueLocationUpdate, GeoclueLocationUpdateAwaiter};
 use crate::request::Request;
 use crate::response::Response;
 use crate::schedule::{Location, SchedulePlan, ScheduledBrightness, ScheduledValues, ScheduledWarmth};
@@ -903,7 +904,12 @@ impl ScheduleEngine {
     }
 
     async fn current_location() -> Option<Location> {
-        match timeout(GEOCLUE_REQUEST_TIMEOUT, GeoclueLocator::current_location()).await {
+        match timeout(GEOCLUE_REQUEST_TIMEOUT, async {
+            let locator = GeoclueLocator::from_system().await?;
+            locator.current_location().await
+        })
+        .await
+        {
             Ok(Ok(location)) => Some(location),
             Ok(Err(error)) => {
                 eprintln!("chroma-daemon geoclue location error: {error}");
@@ -1079,13 +1085,22 @@ impl Message<LocationRefreshCompleted> for ScheduleEngine {
     }
 }
 
-struct GeoclueLocator;
+struct GeoclueLocator {
+    connection: zbus::Connection,
+}
 
 impl GeoclueLocator {
-    async fn current_location() -> Result<Location> {
-        let connection = zbus::Connection::system().await?;
+    async fn from_system() -> Result<Self> {
+        Ok(Self { connection: zbus::Connection::system().await? })
+    }
+
+    async fn current_location(&self) -> Result<Location> {
+        self.await_location_update().await
+    }
+
+    async fn await_location_update(&self) -> Result<Location> {
         let manager = zbus::Proxy::new(
-            &connection,
+            &self.connection,
             "org.freedesktop.GeoClue2",
             "/org/freedesktop/GeoClue2/Manager",
             "org.freedesktop.GeoClue2.Manager",
@@ -1093,26 +1108,42 @@ impl GeoclueLocator {
         .await?;
         let client_path: OwnedObjectPath = manager.call("CreateClient", &()).await?;
         let client = zbus::Proxy::new(
-            &connection,
+            &self.connection,
             "org.freedesktop.GeoClue2",
-            client_path.clone(),
+            client_path,
             "org.freedesktop.GeoClue2.Client",
         )
         .await?;
         client.set_property("DesktopId", "chroma").await?;
         client.set_property("RequestedAccuracyLevel", 1_u32).await?;
-        let _: () = client.call("Start", &()).await?;
-        let location_path: OwnedObjectPath = client.get_property("Location").await?;
-        let location = zbus::Proxy::new(
-            &connection,
-            "org.freedesktop.GeoClue2",
-            location_path,
-            "org.freedesktop.GeoClue2.Location",
-        )
-        .await?;
-        let latitude: f64 = location.get_property("Latitude").await?;
-        let longitude: f64 = location.get_property("Longitude").await?;
+
+        let updates = client.receive_signal("LocationUpdated").await?.map(|message| {
+            message
+                .body()
+                .deserialize::<(OwnedObjectPath, OwnedObjectPath)>()
+                .map(GeoclueLocationUpdate::from_signal_body)
+                .map_err(Error::from)
+        });
+        let mut location_updates = GeoclueLocationUpdateAwaiter::new(updates);
+        let result = async {
+            let _: () = client.call("Start", &()).await?;
+            let location_path = location_updates.location_path().await?;
+            let location = zbus::Proxy::new(
+                &self.connection,
+                "org.freedesktop.GeoClue2",
+                location_path,
+                "org.freedesktop.GeoClue2.Location",
+            )
+            .await?;
+            let latitude: f64 = location.get_property("Latitude").await?;
+            let longitude: f64 = location.get_property("Longitude").await?;
+            let accuracy_meters: f64 = location.get_property("Accuracy").await?;
+            let timestamp: (u64, u64) = location.get_property("Timestamp").await?;
+            GeoclueLocationFix::new(Location { latitude, longitude }, accuracy_meters, timestamp)
+                .location_at(std::time::SystemTime::now())
+        }
+        .await;
         let _: std::result::Result<(), zbus::Error> = client.call("Stop", &()).await;
-        Ok(Location { latitude, longitude })
+        result
     }
 }

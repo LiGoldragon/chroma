@@ -82,11 +82,17 @@ fn hc_chroma_011_config_reload_uses_push_watcher_not_polling_loop() {
 }
 
 #[test]
-fn hc_chroma_012_geoclue_uses_system_bus() {
+fn hc_chroma_012_geoclue_uses_system_bus_and_waits_for_location_updated() {
     let daemon_source = include_str!("../src/daemon.rs");
+    let geoclue_source = include_str!("../src/geoclue.rs");
 
     assert!(daemon_source.contains("zbus::Connection::system().await?"));
     assert!(!daemon_source.contains("zbus::Connection::session().await?"));
+    assert!(daemon_source.contains("receive_signal(\"LocationUpdated\")"));
+    assert!(!daemon_source.contains("client.get_property(\"Location\")"));
+    assert!(geoclue_source.contains("GeoclueLocationUpdateAwaiter"));
+    assert!(geoclue_source.contains("GeoclueRootLocation"));
+    assert!(geoclue_source.contains("GeoclueLocationStale"));
 }
 
 #[test]

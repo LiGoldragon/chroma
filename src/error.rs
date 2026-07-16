@@ -39,6 +39,26 @@ pub enum Error {
     #[error("dbus fdo: {0}")]
     DbusFdo(#[from] zbus::fdo::Error),
 
+    /// GeoClue delivered its root-path sentinel instead of a location object.
+    #[error("geoclue delivered a root location path")]
+    GeoclueRootLocation,
+
+    /// GeoClue ended the location-update subscription without a location.
+    #[error("geoclue location-update stream ended")]
+    GeoclueLocationUpdateStreamEnded,
+
+    /// GeoClue returned a location whose accuracy value is not usable.
+    #[error("geoclue returned an invalid location accuracy")]
+    GeoclueInvalidAccuracy,
+
+    /// GeoClue returned a location whose measurement timestamp is not usable.
+    #[error("geoclue returned an invalid location timestamp")]
+    GeoclueInvalidTimestamp,
+
+    /// GeoClue returned a location older than Chroma's freshness boundary.
+    #[error("geoclue location is stale ({age_seconds}s old)")]
+    GeoclueLocationStale { age_seconds: u64 },
+
     /// The redb database could not be opened or created.
     #[error("redb database: {0}")]
     RedbDatabase(#[source] Box<redb::DatabaseError>),
