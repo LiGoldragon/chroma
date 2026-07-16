@@ -69,6 +69,25 @@ pub struct GeoclueLocationFix {
     timestamp_microseconds: u64,
 }
 
+/// A fix that passed GeoClue freshness and accuracy validation.
+#[derive(Debug, Clone, Copy)]
+pub struct FreshGeoclueLocation {
+    location: Location,
+    expires_at: SystemTime,
+}
+
+impl FreshGeoclueLocation {
+    /// Location accepted from the one authoritative GeoClue path.
+    pub fn location(self) -> Location {
+        self.location
+    }
+
+    /// Whether the fix is still safe to project into a solar clock.
+    pub fn is_current_at(self, now: SystemTime) -> bool {
+        now <= self.expires_at
+    }
+}
+
 impl GeoclueLocationFix {
     /// Construct a fix from the GeoClue location object's properties.
     pub fn new(location: Location, accuracy_meters: f64, timestamp: (u64, u64)) -> Self {
@@ -76,7 +95,7 @@ impl GeoclueLocationFix {
     }
 
     /// Validate metadata before allowing a fix to affect solar scheduling.
-    pub fn location_at(self, now: SystemTime) -> Result<Location> {
+    pub fn location_at(self, now: SystemTime) -> Result<FreshGeoclueLocation> {
         if !self.accuracy_meters.is_finite() || self.accuracy_meters < 0.0 {
             return Err(Error::GeoclueInvalidAccuracy);
         }
@@ -91,6 +110,7 @@ impl GeoclueLocationFix {
         if age > MAX_LOCATION_AGE {
             return Err(Error::GeoclueLocationStale { age_seconds: age.as_secs() });
         }
-        Ok(self.location)
+        let expires_at = measured_at.checked_add(MAX_LOCATION_AGE).ok_or(Error::GeoclueInvalidTimestamp)?;
+        Ok(FreshGeoclueLocation { location: self.location, expires_at })
     }
 }

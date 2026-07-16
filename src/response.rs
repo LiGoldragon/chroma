@@ -24,6 +24,10 @@ pub enum Response {
     Brightness { percent: BrightnessPercent },
     /// The full visual state.
     State { theme: ThemeMode, kelvin: KelvinTemperature, percent: BrightnessPercent },
+    /// Derived UTC correction for local apparent solar time; no coordinate crosses this boundary.
+    SolarClock { utc_offset_seconds: i32, valid_until_unix_seconds: i64 },
+    /// No fresh authoritative GeoClue fix is available for solar-time projection.
+    SolarClockUnavailable,
     /// The daemon refused the request.
     Error { message: String },
 }
@@ -82,6 +86,17 @@ impl Response {
                     percent: Self::decode_payload(payload, 2)?,
                 })
             }
+            "SolarClock" => {
+                Self::expect_payload_count("SolarClock", payload, 2)?;
+                Ok(Self::SolarClock {
+                    utc_offset_seconds: Self::decode_payload(payload, 0)?,
+                    valid_until_unix_seconds: Self::decode_payload(payload, 1)?,
+                })
+            }
+            "SolarClockUnavailable" => {
+                Self::expect_payload_count("SolarClockUnavailable", payload, 0)?;
+                Ok(Self::SolarClockUnavailable)
+            }
             "Error" => {
                 Self::expect_payload_count("Error", payload, 1)?;
                 Ok(Self::Error { message: Self::decode_payload(payload, 0)? })
@@ -122,6 +137,7 @@ impl NotaDecode for Response {
         if let Some(tag) = block.demote_to_string() {
             return match tag {
                 "Accepted" => Ok(Self::Accepted),
+                "SolarClockUnavailable" => Ok(Self::SolarClockUnavailable),
                 other => Err(NotaDecodeError::UnknownVariant { enum_name: "Response", variant: other.to_string() }),
             };
         }
@@ -140,6 +156,10 @@ impl NotaEncode for Response {
             Self::State { theme, kelvin, percent } => {
                 Self::tagged("State", [theme.to_nota(), kelvin.to_nota(), percent.to_nota()])
             }
+            Self::SolarClock { utc_offset_seconds, valid_until_unix_seconds } => {
+                Self::tagged("SolarClock", [utc_offset_seconds.to_nota(), valid_until_unix_seconds.to_nota()])
+            }
+            Self::SolarClockUnavailable => "SolarClockUnavailable".to_owned(),
             Self::Error { message } => Self::tagged("Error", [message.to_nota()]),
         }
     }

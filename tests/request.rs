@@ -41,6 +41,13 @@ fn get_warmth_unit() {
 }
 
 #[test]
+fn get_solar_clock_never_carries_a_coordinate() {
+    let request = round_trip_nota("GetSolarClock");
+    assert_eq!(request, Request::GetSolarClock);
+    round_trip_rkyv(&request);
+}
+
+#[test]
 fn set_theme() {
     let dark = round_trip_nota("(SetTheme Dark)");
     assert_eq!(dark, Request::SetTheme { mode: ThemeMode::Dark });

@@ -53,6 +53,8 @@ pub enum Request {
 
     /// Read the full visual state (theme + warmth + brightness).
     GetState,
+    /// Read the derived apparent-solar clock correction, without exposing a coordinate.
+    GetSolarClock,
 }
 
 impl Request {
@@ -86,6 +88,7 @@ impl Request {
             "GetBrightness" => Ok(Self::GetBrightness),
             "InterruptBrightness" => Ok(Self::InterruptBrightness),
             "GetState" => Ok(Self::GetState),
+            "GetSolarClock" => Ok(Self::GetSolarClock),
             other => Err(NotaDecodeError::UnknownVariant { enum_name: "Request", variant: other.to_string() }),
         }
     }
@@ -94,7 +97,13 @@ impl Request {
         let tag = Self::tag(children)?;
         let payload = &children[1..];
         match tag {
-            "GetTheme" | "GetWarmth" | "InterruptWarmth" | "GetBrightness" | "InterruptBrightness" | "GetState" => {
+            "GetTheme"
+            | "GetWarmth"
+            | "InterruptWarmth"
+            | "GetBrightness"
+            | "InterruptBrightness"
+            | "GetState"
+            | "GetSolarClock" => {
                 Self::expect_payload_count(tag, payload, 0)?;
                 Self::decode_unit(tag)
             }
@@ -220,6 +229,7 @@ impl NotaEncode for Request {
             }
             Self::InterruptBrightness => "InterruptBrightness".to_owned(),
             Self::GetState => "GetState".to_owned(),
+            Self::GetSolarClock => "GetSolarClock".to_owned(),
         }
     }
 }

@@ -26,10 +26,11 @@ use crate::brightness::BrightnessPercent;
 use crate::config::{Config, ConfigFile};
 use crate::error::{Error, Result};
 use crate::gamma::GammaClient;
-use crate::geoclue::{GeoclueLocationFix, GeoclueLocationUpdate, GeoclueLocationUpdateAwaiter};
+use crate::geoclue::{FreshGeoclueLocation, GeoclueLocationFix, GeoclueLocationUpdate, GeoclueLocationUpdateAwaiter};
 use crate::request::Request;
 use crate::response::Response;
 use crate::schedule::{Location, SchedulePlan, ScheduledBrightness, ScheduledValues, ScheduledWarmth};
+use crate::solar_time::SolarClockProjection;
 use crate::state::{
     ReadStoredLocation, ReadStoredState, RecordBrightness, RecordLocation, RecordTheme, RecordWarmth, StateStore,
     StoredVisualState,
@@ -42,6 +43,7 @@ use crate::wire::{read_frame, socket_path, write_frame};
 const GEOCLUE_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 const POST_RESUME_LOCATION_REFRESH_DELAY: Duration = Duration::from_secs(5);
 const LOCATION_REFRESH_RETRY_DELAY: Duration = Duration::from_secs(300);
+const SOLAR_CLOCK_LOCATION_REFRESH_DELAY: Duration = Duration::from_secs(240);
 
 /// Run the daemon until SIGTERM / Ctrl-C.
 pub async fn run() -> Result<()> {
@@ -279,7 +281,26 @@ impl ChromaRoot {
             Request::GetState => {
                 Ok(Response::State { theme: self.theme, kelvin: self.warmth, percent: self.brightness })
             }
+            Request::GetSolarClock => self.solar_clock().await,
         }
+    }
+
+    async fn solar_clock(&self) -> Result<Response> {
+        let schedule_engine = self
+            .schedule_engine
+            .as_ref()
+            .ok_or_else(|| Error::Daemon { message: "schedule engine is not installed".into() })?;
+        let projection = schedule_engine
+            .ask(ReadSolarClock)
+            .await
+            .map_err(|error| Error::ActorCall { message: error.to_string() })?;
+        Ok(match projection {
+            Some(projection) => Response::SolarClock {
+                utc_offset_seconds: projection.utc_offset_seconds(),
+                valid_until_unix_seconds: projection.valid_until_unix_seconds(),
+            },
+            None => Response::SolarClockUnavailable,
+        })
     }
 
     async fn apply_scheduled_state(&mut self, values: ScheduledValues) -> Result<()> {
@@ -887,6 +908,7 @@ struct ScheduleEngine {
     root: ActorRef<ChromaRoot>,
     state_store: ActorRef<StateStore>,
     location: Option<Location>,
+    fresh_location: Option<FreshGeoclueLocation>,
     schedule_generation: u64,
     location_generation: u64,
 }
@@ -903,7 +925,7 @@ impl ScheduleEngine {
         reference
     }
 
-    async fn current_location() -> Option<Location> {
+    async fn current_location() -> Option<FreshGeoclueLocation> {
         match timeout(GEOCLUE_REQUEST_TIMEOUT, async {
             let locator = GeoclueLocator::from_system().await?;
             locator.current_location().await
@@ -928,9 +950,6 @@ impl ScheduleEngine {
     }
 
     fn request_location_refresh(&mut self, context: &mut Context<Self, ()>, delay: Duration) {
-        if !self.config.needs_geolocation() {
-            return;
-        }
         self.location_generation = self.location_generation.saturating_add(1);
         let generation = self.location_generation;
         let delivery = context.actor_ref().tell(LocationRefreshDue { generation });
@@ -960,22 +979,25 @@ impl ScheduleEngine {
     async fn complete_location_refresh(
         &mut self,
         generation: u64,
-        location: Option<Location>,
+        location: Option<FreshGeoclueLocation>,
         context: &mut Context<Self, ()>,
     ) {
         if generation != self.location_generation {
             return;
         }
         match location {
-            Some(location) => {
+            Some(fresh_location) => {
+                let location = fresh_location.location();
                 if self.location != Some(location) {
                     if let Err(error) = self.state_store.ask(RecordLocation { location }).await {
                         eprintln!("chroma-daemon location persist error: {error}");
                     }
                     self.location = Some(location);
                 }
+                self.fresh_location = Some(fresh_location);
                 let schedule_generation = self.next_schedule_generation();
                 self.reconcile(schedule_generation, context).await;
+                self.request_location_refresh(context, SOLAR_CLOCK_LOCATION_REFRESH_DELAY);
                 eprintln!("chroma-daemon recomputed solar schedule from fresh GeoClue location");
             }
             None if self.location.is_none() => {
@@ -1003,6 +1025,7 @@ impl Actor for ScheduleEngine {
             root: args.root,
             state_store: args.state_store,
             location: args.location,
+            fresh_location: None,
             schedule_generation: 0,
             location_generation: 0,
         })
@@ -1072,7 +1095,19 @@ impl Message<LocationRefreshDue> for ScheduleEngine {
 
 struct LocationRefreshCompleted {
     generation: u64,
-    location: Option<Location>,
+    location: Option<FreshGeoclueLocation>,
+}
+
+struct ReadSolarClock;
+
+impl Message<ReadSolarClock> for ScheduleEngine {
+    type Reply = Option<SolarClockProjection>;
+
+    async fn handle(&mut self, _message: ReadSolarClock, _context: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.fresh_location
+            .filter(|location| location.is_current_at(std::time::SystemTime::now()))
+            .map(|location| SolarClockProjection::at(location.location(), chrono::Utc::now()))
+    }
 }
 
 impl Message<LocationRefreshCompleted> for ScheduleEngine {
@@ -1092,11 +1127,11 @@ impl GeoclueLocator {
         Ok(Self { connection: zbus::Connection::system().await? })
     }
 
-    async fn current_location(&self) -> Result<Location> {
+    async fn current_location(&self) -> Result<FreshGeoclueLocation> {
         self.await_location_update().await
     }
 
-    async fn await_location_update(&self) -> Result<Location> {
+    async fn await_location_update(&self) -> Result<FreshGeoclueLocation> {
         let manager = zbus::Proxy::new(
             &self.connection,
             "org.freedesktop.GeoClue2",

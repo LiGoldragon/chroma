@@ -59,5 +59,8 @@ fn fresh_geoclue_fix_is_accepted_for_solar_schedule_projection() {
     let location = Location { latitude: 1.0, longitude: 1.0 };
     let fix = GeoclueLocationFix::new(location, 25_000.0, (1_000_000, 0));
 
-    assert_eq!(fix.location_at(measured_at + Duration::from_secs(1)).expect("fresh fix is accepted"), location);
+    assert_eq!(
+        fix.location_at(measured_at + Duration::from_secs(1)).expect("fresh fix is accepted").location(),
+        location
+    );
 }

@@ -21,6 +21,7 @@ pub mod geoclue;
 pub mod request;
 pub mod response;
 pub mod schedule;
+pub mod solar_time;
 pub mod state;
 pub mod theme;
 pub mod time;
@@ -34,6 +35,7 @@ pub use geoclue::{GeoclueLocationFix, GeoclueLocationUpdate, GeoclueLocationUpda
 pub use request::Request;
 pub use response::Response;
 pub use schedule::{Location, SchedulePlan, ScheduledBrightness, ScheduledValues, ScheduledWarmth};
+pub use solar_time::SolarClockProjection;
 pub use state::{
     ReadStoredLocation, ReadStoredState, RecordBrightness, RecordLocation, RecordTheme, RecordWarmth, StateStore,
     StoredLocation, StoredVisualState,
