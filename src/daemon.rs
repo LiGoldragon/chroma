@@ -45,7 +45,6 @@ const POST_RESUME_LOCATION_REFRESH_DELAY: Duration = Duration::from_secs(5);
 // A stale GeoClue cache may outlive an otherwise valid held location. Retry
 // coarsely so the solar status recovers instead of remaining unavailable.
 const LOCATION_REFRESH_RETRY_DELAY: Duration = Duration::from_secs(60);
-const SOLAR_CLOCK_LOCATION_REFRESH_DELAY: Duration = Duration::from_secs(240);
 
 /// Run the daemon until SIGTERM / Ctrl-C.
 pub async fn run() -> Result<()> {
@@ -996,10 +995,11 @@ impl ScheduleEngine {
                     }
                     self.location = Some(location);
                 }
+                let refresh_delay = fresh_location.refresh_delay_at(std::time::SystemTime::now());
                 self.fresh_location = Some(fresh_location);
                 let schedule_generation = self.next_schedule_generation();
                 self.reconcile(schedule_generation, context).await;
-                self.request_location_refresh(context, SOLAR_CLOCK_LOCATION_REFRESH_DELAY);
+                self.request_location_refresh(context, refresh_delay);
                 eprintln!("chroma-daemon recomputed solar schedule from fresh GeoClue location");
             }
             None => {

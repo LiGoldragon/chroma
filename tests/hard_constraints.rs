@@ -134,7 +134,7 @@ fn hc_chroma_015_resume_location_refresh_is_separate_from_time_reconcile() {
     assert!(daemon_source.contains("chroma-daemon accepted fresh GeoClue location"));
     assert!(daemon_source.contains("chroma-daemon recomputed solar schedule from fresh GeoClue location"));
     assert!(daemon_source.contains("Some(fresh_location) =>"));
-    assert!(daemon_source.contains("SOLAR_CLOCK_LOCATION_REFRESH_DELAY"));
+    assert!(daemon_source.contains("fresh_location.refresh_delay_at"));
     assert!(daemon_source.contains("self.request_location_refresh(context, Duration::ZERO);"));
 }
 

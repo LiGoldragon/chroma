@@ -59,6 +59,11 @@ pub enum Error {
     #[error("geoclue location is stale ({age_seconds}s old)")]
     GeoclueLocationStale { age_seconds: u64 },
 
+    /// GeoClue returned a technically fresh location that would expire before
+    /// the next coarse solar-clock status interval.
+    #[error("geoclue location expires too soon ({remaining_seconds}s remaining)")]
+    GeoclueLocationExpiresSoon { remaining_seconds: u64 },
+
     /// The redb database could not be opened or created.
     #[error("redb database: {0}")]
     RedbDatabase(#[source] Box<redb::DatabaseError>),

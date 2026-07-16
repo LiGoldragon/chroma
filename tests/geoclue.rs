@@ -4,6 +4,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use chroma::{
     Error, GeoclueLocationFix, GeoclueLocationUpdate, GeoclueLocationUpdateAwaiter, Location, MAX_LOCATION_AGE,
+    MINIMUM_SOLAR_CLOCK_VALIDITY,
 };
 use futures_util::stream;
 use tokio::sync::oneshot;
@@ -63,4 +64,15 @@ fn fresh_geoclue_fix_is_accepted_for_solar_schedule_projection() {
         fix.location_at(measured_at + Duration::from_secs(1)).expect("fresh fix is accepted").location(),
         location
     );
+}
+
+#[test]
+fn nearly_expired_geoclue_fix_is_rejected_before_it_can_flash_solar_time() {
+    let measured_at = UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let now = measured_at + MAX_LOCATION_AGE - MINIMUM_SOLAR_CLOCK_VALIDITY + Duration::from_secs(1);
+    let fix = GeoclueLocationFix::new(Location { latitude: 1.0, longitude: 1.0 }, 25_000.0, (1_000_000, 0));
+
+    let error = fix.location_at(now).expect_err("near-expiry fix cannot drive a status-bar projection");
+    assert!(matches!(error, Error::GeoclueLocationExpiresSoon { remaining_seconds }
+            if remaining_seconds < MINIMUM_SOLAR_CLOCK_VALIDITY.as_secs()));
 }

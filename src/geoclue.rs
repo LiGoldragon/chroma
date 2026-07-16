@@ -16,6 +16,12 @@ use crate::schedule::Location;
 /// Maximum accepted age of a GeoClue fix at the time Chroma receives it.
 pub const MAX_LOCATION_AGE: Duration = Duration::from_secs(300);
 
+/// A clock projection needs enough remaining freshness to survive the next
+/// coarse status query rather than flashing unavailable immediately.
+pub const MINIMUM_SOLAR_CLOCK_VALIDITY: Duration = Duration::from_secs(90);
+const SOLAR_CLOCK_REFRESH_LEAD: Duration = Duration::from_secs(60);
+const MAX_SOLAR_CLOCK_REFRESH_DELAY: Duration = Duration::from_secs(240);
+
 /// The object paths carried by GeoClue's `LocationUpdated` signal.
 #[derive(Debug)]
 pub struct GeoclueLocationUpdate {
@@ -86,6 +92,15 @@ impl FreshGeoclueLocation {
     pub fn is_current_at(self, now: SystemTime) -> bool {
         now <= self.expires_at
     }
+
+    /// Schedule the next coarse refresh before this accepted fix expires.
+    pub fn refresh_delay_at(self, now: SystemTime) -> Duration {
+        self.expires_at
+            .duration_since(now)
+            .unwrap_or(Duration::ZERO)
+            .saturating_sub(SOLAR_CLOCK_REFRESH_LEAD)
+            .min(MAX_SOLAR_CLOCK_REFRESH_DELAY)
+    }
 }
 
 impl GeoclueLocationFix {
@@ -111,6 +126,10 @@ impl GeoclueLocationFix {
             return Err(Error::GeoclueLocationStale { age_seconds: age.as_secs() });
         }
         let expires_at = measured_at.checked_add(MAX_LOCATION_AGE).ok_or(Error::GeoclueInvalidTimestamp)?;
+        let remaining = expires_at.duration_since(now).map_err(|_| Error::GeoclueInvalidTimestamp)?;
+        if remaining < MINIMUM_SOLAR_CLOCK_VALIDITY {
+            return Err(Error::GeoclueLocationExpiresSoon { remaining_seconds: remaining.as_secs() });
+        }
         Ok(FreshGeoclueLocation { location: self.location, expires_at })
     }
 }
