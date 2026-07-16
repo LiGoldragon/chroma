@@ -967,15 +967,16 @@ impl ScheduleEngine {
             return;
         }
         match location {
-            Some(location) if self.location != Some(location) => {
-                if let Err(error) = self.state_store.ask(RecordLocation { location }).await {
-                    eprintln!("chroma-daemon location persist error: {error}");
+            Some(location) => {
+                if self.location != Some(location) {
+                    if let Err(error) = self.state_store.ask(RecordLocation { location }).await {
+                        eprintln!("chroma-daemon location persist error: {error}");
+                    }
+                    self.location = Some(location);
                 }
-                self.location = Some(location);
                 let schedule_generation = self.next_schedule_generation();
                 self.reconcile(schedule_generation, context).await;
             }
-            Some(_) => {}
             None if self.location.is_none() => {
                 self.request_location_refresh(context, LOCATION_REFRESH_RETRY_DELAY);
             }
@@ -1027,9 +1028,7 @@ impl Message<ReconcileSchedule> for ScheduleEngine {
     async fn handle(&mut self, _message: ReconcileSchedule, context: &mut Context<Self, Self::Reply>) {
         let generation = self.next_schedule_generation();
         self.reconcile(generation, context).await;
-        if self.location.is_none() {
-            self.request_location_refresh(context, Duration::ZERO);
-        }
+        self.request_location_refresh(context, Duration::ZERO);
     }
 }
 
@@ -1043,9 +1042,7 @@ impl Message<ScheduledScheduleEvaluation> for ScheduleEngine {
     async fn handle(&mut self, message: ScheduledScheduleEvaluation, context: &mut Context<Self, Self::Reply>) {
         if message.generation == self.schedule_generation {
             self.reconcile(message.generation, context).await;
-            if self.location.is_none() {
-                self.request_location_refresh(context, Duration::ZERO);
-            }
+            self.request_location_refresh(context, Duration::ZERO);
         }
     }
 }
@@ -1139,8 +1136,10 @@ impl GeoclueLocator {
             let longitude: f64 = location.get_property("Longitude").await?;
             let accuracy_meters: f64 = location.get_property("Accuracy").await?;
             let timestamp: (u64, u64) = location.get_property("Timestamp").await?;
-            GeoclueLocationFix::new(Location { latitude, longitude }, accuracy_meters, timestamp)
-                .location_at(std::time::SystemTime::now())
+            let location = GeoclueLocationFix::new(Location { latitude, longitude }, accuracy_meters, timestamp)
+                .location_at(std::time::SystemTime::now())?;
+            eprintln!("chroma-daemon accepted fresh GeoClue location (accuracy: {:.0}m)", accuracy_meters);
+            Ok(location)
         }
         .await;
         let _: std::result::Result<(), zbus::Error> = client.call("Stop", &()).await;
