@@ -161,3 +161,16 @@ Tests:
 - `theme_sunset_early_projects_from_location_solar_time`
 - `theme_sunrise_on_time_projects_from_location_solar_time`
 - `config_file_decodes_sunrise_sunset_and_relative_solar_offsets`
+
+## HC-CHROMA-015 — Schedule Reconciliation Is Change-Driven
+
+A schedule evaluation describes desired visual state; it is not itself a
+state-change event. The root compares each scheduled value with the value it
+already owns and applies only real changes. Repeated deadline evaluation or a
+fresh GeoClue fix must not rewrite theme files, reload Ghostty, restart an
+in-progress ramp, or repeat an unchanged gamma write.
+
+Explicit CLI setters and daemon startup reapplication remain authoritative
+apply requests and are not deduplicated by this rule.
+
+Test: `hc_chroma_017_schedule_reconciliation_applies_only_changed_values`.

@@ -158,7 +158,18 @@ fn hc_chroma_016_startup_reapplies_state_and_civil_axes_wait_for_location() {
 }
 
 #[test]
-fn hc_chroma_017_schedule_projects_elapsed_ramp_time() {
+fn hc_chroma_017_schedule_reconciliation_applies_only_changed_values() {
+    let daemon_source = include_str!("../src/daemon.rs");
+
+    assert!(daemon_source.contains("theme != self.theme"));
+    assert!(daemon_source.contains("kelvin != self.warmth"));
+    assert!(daemon_source.contains("target_kelvin != self.warmth"));
+    assert!(daemon_source.contains("percent != self.brightness"));
+    assert!(daemon_source.contains("target_percent != self.brightness"));
+}
+
+#[test]
+fn hc_chroma_018_schedule_projects_elapsed_ramp_time() {
     let schedule_source = include_str!("../src/schedule.rs");
     let daemon_source = include_str!("../src/daemon.rs");
 

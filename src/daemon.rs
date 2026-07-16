@@ -305,27 +305,35 @@ impl ChromaRoot {
     }
 
     async fn apply_scheduled_state(&mut self, values: ScheduledValues) -> Result<()> {
-        if let Some(theme) = values.theme {
+        if let Some(theme) = values.theme
+            && theme != self.theme
+        {
             self.set_theme(theme).await?;
         }
         if let Some(warmth) = values.warmth {
             match warmth {
-                ScheduledWarmth::Settled { kelvin } => {
+                ScheduledWarmth::Settled { kelvin } if kelvin != self.warmth => {
                     self.instant_warmth(kelvin).await?;
                 }
-                ScheduledWarmth::Transition { current_kelvin, target_kelvin, remaining_duration } => {
+                ScheduledWarmth::Transition { current_kelvin, target_kelvin, remaining_duration }
+                    if target_kelvin != self.warmth =>
+                {
                     self.schedule_warmth_transition(current_kelvin, target_kelvin, remaining_duration).await?;
                 }
+                ScheduledWarmth::Settled { .. } | ScheduledWarmth::Transition { .. } => {}
             }
         }
         if let Some(brightness) = values.brightness {
             match brightness {
-                ScheduledBrightness::Settled { percent } => {
+                ScheduledBrightness::Settled { percent } if percent != self.brightness => {
                     self.instant_brightness(percent).await?;
                 }
-                ScheduledBrightness::Transition { current_percent, target_percent, remaining_duration } => {
+                ScheduledBrightness::Transition { current_percent, target_percent, remaining_duration }
+                    if target_percent != self.brightness =>
+                {
                     self.schedule_brightness_transition(current_percent, target_percent, remaining_duration).await?;
                 }
+                ScheduledBrightness::Settled { .. } | ScheduledBrightness::Transition { .. } => {}
             }
         }
         Ok(())

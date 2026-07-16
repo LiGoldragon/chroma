@@ -185,10 +185,13 @@ transition. Geolocation refresh is a separate delayed flow after
 resume so a slow or cold geoclue read cannot block time-of-day
 theme, warmth, or brightness changes. If the fresh location differs
 from the schedule actor's held location, Chroma persists it and
-reconciles the schedule again using that location. Each schedule reconciliation
-increments a generation counter so stale delayed messages from
-before suspend or config reload cannot keep an old deadline chain
-alive.
+reconciles the schedule again using that location. Reconciliation projects
+wanted state, but the root applies only values that differ from the visual state
+it already owns; repeated deadline evaluation and fresh location fixes therefore
+do not rewrite theme files, reload applications, restart ramps, or repeat gamma
+writes when the projection is unchanged. Each schedule reconciliation increments
+a generation counter so stale delayed messages from before suspend or config
+reload cannot keep an old deadline chain alive.
 Data-format inputs at the Chroma boundary are NOTA; YAML and YML
 inputs are rejected. `GhosttyConfigTemplates` paths are references
 to complete Ghostty-native config files produced by the host
