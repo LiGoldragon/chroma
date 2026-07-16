@@ -976,6 +976,7 @@ impl ScheduleEngine {
                 }
                 let schedule_generation = self.next_schedule_generation();
                 self.reconcile(schedule_generation, context).await;
+                eprintln!("chroma-daemon recomputed solar schedule from fresh GeoClue location");
             }
             None if self.location.is_none() => {
                 self.request_location_refresh(context, LOCATION_REFRESH_RETRY_DELAY);
