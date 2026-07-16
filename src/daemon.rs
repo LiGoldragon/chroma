@@ -42,7 +42,9 @@ use crate::wire::{read_frame, socket_path, write_frame};
 
 const GEOCLUE_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 const POST_RESUME_LOCATION_REFRESH_DELAY: Duration = Duration::from_secs(5);
-const LOCATION_REFRESH_RETRY_DELAY: Duration = Duration::from_secs(300);
+// A stale GeoClue cache may outlive an otherwise valid held location. Retry
+// coarsely so the solar status recovers instead of remaining unavailable.
+const LOCATION_REFRESH_RETRY_DELAY: Duration = Duration::from_secs(60);
 const SOLAR_CLOCK_LOCATION_REFRESH_DELAY: Duration = Duration::from_secs(240);
 
 /// Run the daemon until SIGTERM / Ctrl-C.
@@ -1000,10 +1002,9 @@ impl ScheduleEngine {
                 self.request_location_refresh(context, SOLAR_CLOCK_LOCATION_REFRESH_DELAY);
                 eprintln!("chroma-daemon recomputed solar schedule from fresh GeoClue location");
             }
-            None if self.location.is_none() => {
+            None => {
                 self.request_location_refresh(context, LOCATION_REFRESH_RETRY_DELAY);
             }
-            None => {}
         }
     }
 }

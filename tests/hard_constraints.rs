@@ -169,3 +169,15 @@ fn hc_chroma_017_schedule_projects_elapsed_ramp_time() {
     assert!(daemon_source.contains("WarmthApplication::RampFrom"));
     assert!(daemon_source.contains("BrightnessApplication::RampFrom"));
 }
+
+#[test]
+fn hc_chroma_018_stale_location_refresh_retries_with_a_held_location() {
+    let daemon_source = include_str!("../src/daemon.rs");
+
+    assert!(daemon_source.contains("const LOCATION_REFRESH_RETRY_DELAY: Duration = Duration::from_secs(60);"));
+    assert!(
+        daemon_source.contains(
+            "None => {\n                self.request_location_refresh(context, LOCATION_REFRESH_RETRY_DELAY);"
+        )
+    );
+}
