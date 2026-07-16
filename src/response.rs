@@ -25,7 +25,11 @@ pub enum Response {
     /// The full visual state.
     State { theme: ThemeMode, kelvin: KelvinTemperature, percent: BrightnessPercent },
     /// Derived UTC correction for local apparent solar time; no coordinate crosses this boundary.
-    SolarClock { utc_offset_seconds: i32, valid_until_unix_seconds: i64 },
+    ///
+    /// The second positional wire value is only the UTC-day boundary for the
+    /// equation-of-time calculation. GeoClue freshness is represented solely
+    /// by `SolarClockUnavailable`, never by this field.
+    SolarClock { utc_offset_seconds: i32, equation_of_time_valid_until_unix_seconds: i64 },
     /// No fresh authoritative GeoClue fix is available for solar-time projection.
     SolarClockUnavailable,
     /// The daemon refused the request.
@@ -90,7 +94,7 @@ impl Response {
                 Self::expect_payload_count("SolarClock", payload, 2)?;
                 Ok(Self::SolarClock {
                     utc_offset_seconds: Self::decode_payload(payload, 0)?,
-                    valid_until_unix_seconds: Self::decode_payload(payload, 1)?,
+                    equation_of_time_valid_until_unix_seconds: Self::decode_payload(payload, 1)?,
                 })
             }
             "SolarClockUnavailable" => {
@@ -156,9 +160,10 @@ impl NotaEncode for Response {
             Self::State { theme, kelvin, percent } => {
                 Self::tagged("State", [theme.to_nota(), kelvin.to_nota(), percent.to_nota()])
             }
-            Self::SolarClock { utc_offset_seconds, valid_until_unix_seconds } => {
-                Self::tagged("SolarClock", [utc_offset_seconds.to_nota(), valid_until_unix_seconds.to_nota()])
-            }
+            Self::SolarClock { utc_offset_seconds, equation_of_time_valid_until_unix_seconds } => Self::tagged(
+                "SolarClock",
+                [utc_offset_seconds.to_nota(), equation_of_time_valid_until_unix_seconds.to_nota()],
+            ),
             Self::SolarClockUnavailable => "SolarClockUnavailable".to_owned(),
             Self::Error { message } => Self::tagged("Error", [message.to_nota()]),
         }

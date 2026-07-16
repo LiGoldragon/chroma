@@ -20,8 +20,9 @@ fn accepted_response_round_trips_through_rkyv_wire_format() {
 }
 
 #[test]
-fn solar_clock_response_round_trips_without_a_coordinate() {
-    let response = Response::SolarClock { utc_offset_seconds: -854, valid_until_unix_seconds: 1_736_208_000 };
+fn solar_clock_response_preserves_positional_wire_while_naming_equation_validity() {
+    let response =
+        Response::SolarClock { utc_offset_seconds: -854, equation_of_time_valid_until_unix_seconds: 1_736_208_000 };
     let rendered = response.to_nota().expect("nota encode");
 
     assert_eq!(rendered, "(SolarClock -854 1736208000)");

@@ -14,15 +14,16 @@ use crate::schedule::Location;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SolarClockProjection {
     utc_offset_seconds: i32,
-    valid_until_unix_seconds: i64,
+    equation_of_time_valid_until_unix_seconds: i64,
 }
 
 impl SolarClockProjection {
     /// Compute a local apparent-solar correction from a fresh GeoClue location.
     pub fn at(location: Location, now: DateTime<Utc>) -> Self {
         let fractional_hour = now.hour() as f64 + now.minute() as f64 / 60.0 + now.second() as f64 / 3600.0;
+        let days_in_year = if now.date_naive().leap_year() { 366.0 } else { 365.0 };
         let fractional_year =
-            2.0 * std::f64::consts::PI / 365.0 * (now.ordinal0() as f64 + (fractional_hour - 12.0) / 24.0);
+            2.0 * std::f64::consts::PI / days_in_year * (now.ordinal0() as f64 + (fractional_hour - 12.0) / 24.0);
         let equation_of_time_minutes = 229.18
             * (0.000075 + 0.001868 * fractional_year.cos()
                 - 0.032077 * fractional_year.sin()
@@ -33,7 +34,7 @@ impl SolarClockProjection {
             .and_hms_opt(0, 0, 0)
             .expect("midnight is valid")
             .and_utc();
-        Self { utc_offset_seconds, valid_until_unix_seconds: next_utc_day.timestamp() }
+        Self { utc_offset_seconds, equation_of_time_valid_until_unix_seconds: next_utc_day.timestamp() }
     }
 
     /// The correction to add to UTC before formatting the solar clock.
@@ -42,7 +43,7 @@ impl SolarClockProjection {
     }
 
     /// UTC epoch second after which the equation-of-time correction is refreshed.
-    pub fn valid_until_unix_seconds(self) -> i64 {
-        self.valid_until_unix_seconds
+    pub fn equation_of_time_valid_until_unix_seconds(self) -> i64 {
+        self.equation_of_time_valid_until_unix_seconds
     }
 }

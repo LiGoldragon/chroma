@@ -32,7 +32,7 @@ pub use brightness::{BrightnessAxis, BrightnessLevel, BrightnessPercent, Brightn
 pub use config::{Config, ConfigFile};
 pub use error::{Error, Result};
 pub use geoclue::{
-    GeoclueLocationFix, GeoclueLocationUpdate, GeoclueLocationUpdateAwaiter, MAX_LOCATION_AGE,
+    FreshLocationLease, GeoclueLocationFix, GeoclueLocationUpdate, GeoclueLocationUpdateAwaiter, MAX_LOCATION_AGE,
     MINIMUM_SOLAR_CLOCK_VALIDITY,
 };
 pub use request::Request;

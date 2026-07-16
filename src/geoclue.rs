@@ -16,10 +16,11 @@ use crate::schedule::Location;
 /// Maximum accepted age of a GeoClue fix at the time Chroma receives it.
 pub const MAX_LOCATION_AGE: Duration = Duration::from_secs(300);
 
-/// A clock projection needs enough remaining freshness to survive the next
-/// coarse status query rather than flashing unavailable immediately.
-pub const MINIMUM_SOLAR_CLOCK_VALIDITY: Duration = Duration::from_secs(90);
-const SOLAR_CLOCK_REFRESH_LEAD: Duration = Duration::from_secs(60);
+/// A replacement fix needs enough remaining freshness for an early renewal
+/// attempt plus several bounded retries. Shorter-lived cached fixes are not
+/// allowed to displace a still-valid held fix.
+pub const MINIMUM_SOLAR_CLOCK_VALIDITY: Duration = Duration::from_secs(120);
+const SOLAR_CLOCK_REFRESH_LEAD: Duration = MINIMUM_SOLAR_CLOCK_VALIDITY;
 const MAX_SOLAR_CLOCK_REFRESH_DELAY: Duration = Duration::from_secs(240);
 
 /// The object paths carried by GeoClue's `LocationUpdated` signal.
@@ -80,6 +81,32 @@ pub struct GeoclueLocationFix {
 pub struct FreshGeoclueLocation {
     location: Location,
     expires_at: SystemTime,
+}
+
+/// The schedule actor's held authoritative location lease.
+///
+/// Failed or insufficient-lifetime renewals leave this lease unchanged. That
+/// makes renewal failure the normal case until the held fix actually expires.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FreshLocationLease {
+    held: Option<FreshGeoclueLocation>,
+}
+
+impl FreshLocationLease {
+    /// Start without an authoritative live fix.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Accept a validated replacement without an intermediate empty state.
+    pub fn renew(&mut self, replacement: FreshGeoclueLocation) {
+        self.held = Some(replacement);
+    }
+
+    /// Return the held fix through its actual expiry instant.
+    pub fn current_at(self, now: SystemTime) -> Option<FreshGeoclueLocation> {
+        self.held.filter(|location| location.is_current_at(now))
+    }
 }
 
 impl FreshGeoclueLocation {

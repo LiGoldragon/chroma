@@ -26,7 +26,9 @@ use crate::brightness::BrightnessPercent;
 use crate::config::{Config, ConfigFile};
 use crate::error::{Error, Result};
 use crate::gamma::GammaClient;
-use crate::geoclue::{FreshGeoclueLocation, GeoclueLocationFix, GeoclueLocationUpdate, GeoclueLocationUpdateAwaiter};
+use crate::geoclue::{
+    FreshGeoclueLocation, FreshLocationLease, GeoclueLocationFix, GeoclueLocationUpdate, GeoclueLocationUpdateAwaiter,
+};
 use crate::request::Request;
 use crate::response::Response;
 use crate::schedule::{Location, SchedulePlan, ScheduledBrightness, ScheduledValues, ScheduledWarmth};
@@ -43,8 +45,9 @@ use crate::wire::{read_frame, socket_path, write_frame};
 const GEOCLUE_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 const POST_RESUME_LOCATION_REFRESH_DELAY: Duration = Duration::from_secs(5);
 // A stale GeoClue cache may outlive an otherwise valid held location. Retry
-// coarsely so the solar status recovers instead of remaining unavailable.
-const LOCATION_REFRESH_RETRY_DELAY: Duration = Duration::from_secs(60);
+// well inside the renewal margin while retaining that held fix until expiry.
+const LOCATION_RENEWAL_RETRY_DELAY: Duration = Duration::from_secs(10);
+const LOCATION_UNAVAILABLE_RETRY_DELAY: Duration = Duration::from_secs(60);
 
 /// Run the daemon until SIGTERM / Ctrl-C.
 pub async fn run() -> Result<()> {
@@ -298,7 +301,7 @@ impl ChromaRoot {
         Ok(match projection {
             Some(projection) => Response::SolarClock {
                 utc_offset_seconds: projection.utc_offset_seconds(),
-                valid_until_unix_seconds: projection.valid_until_unix_seconds(),
+                equation_of_time_valid_until_unix_seconds: projection.equation_of_time_valid_until_unix_seconds(),
             },
             None => Response::SolarClockUnavailable,
         })
@@ -917,7 +920,7 @@ struct ScheduleEngine {
     root: ActorRef<ChromaRoot>,
     state_store: ActorRef<StateStore>,
     location: Option<Location>,
-    fresh_location: Option<FreshGeoclueLocation>,
+    location_lease: FreshLocationLease,
     schedule_generation: u64,
     location_generation: u64,
 }
@@ -981,7 +984,7 @@ impl ScheduleEngine {
             let _retry = context
                 .actor_ref()
                 .tell(ScheduledScheduleEvaluation { generation })
-                .send_after(LOCATION_REFRESH_RETRY_DELAY);
+                .send_after(LOCATION_UNAVAILABLE_RETRY_DELAY);
         }
     }
 
@@ -1004,14 +1007,19 @@ impl ScheduleEngine {
                     self.location = Some(location);
                 }
                 let refresh_delay = fresh_location.refresh_delay_at(std::time::SystemTime::now());
-                self.fresh_location = Some(fresh_location);
+                self.location_lease.renew(fresh_location);
                 let schedule_generation = self.next_schedule_generation();
                 self.reconcile(schedule_generation, context).await;
                 self.request_location_refresh(context, refresh_delay);
                 eprintln!("chroma-daemon recomputed solar schedule from fresh GeoClue location");
             }
             None => {
-                self.request_location_refresh(context, LOCATION_REFRESH_RETRY_DELAY);
+                let retry_delay = if self.location_lease.current_at(std::time::SystemTime::now()).is_some() {
+                    LOCATION_RENEWAL_RETRY_DELAY
+                } else {
+                    LOCATION_UNAVAILABLE_RETRY_DELAY
+                };
+                self.request_location_refresh(context, retry_delay);
             }
         }
     }
@@ -1034,7 +1042,7 @@ impl Actor for ScheduleEngine {
             root: args.root,
             state_store: args.state_store,
             location: args.location,
-            fresh_location: None,
+            location_lease: FreshLocationLease::new(),
             schedule_generation: 0,
             location_generation: 0,
         })
@@ -1113,8 +1121,8 @@ impl Message<ReadSolarClock> for ScheduleEngine {
     type Reply = Option<SolarClockProjection>;
 
     async fn handle(&mut self, _message: ReadSolarClock, _context: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        self.fresh_location
-            .filter(|location| location.is_current_at(std::time::SystemTime::now()))
+        self.location_lease
+            .current_at(std::time::SystemTime::now())
             .map(|location| SolarClockProjection::at(location.location(), chrono::Utc::now()))
     }
 }

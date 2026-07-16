@@ -3,8 +3,8 @@
 use std::time::{Duration, UNIX_EPOCH};
 
 use chroma::{
-    Error, GeoclueLocationFix, GeoclueLocationUpdate, GeoclueLocationUpdateAwaiter, Location, MAX_LOCATION_AGE,
-    MINIMUM_SOLAR_CLOCK_VALIDITY,
+    Error, FreshLocationLease, GeoclueLocationFix, GeoclueLocationUpdate, GeoclueLocationUpdateAwaiter, Location,
+    MAX_LOCATION_AGE, MINIMUM_SOLAR_CLOCK_VALIDITY,
 };
 use futures_util::stream;
 use tokio::sync::oneshot;
@@ -75,4 +75,55 @@ fn nearly_expired_geoclue_fix_is_rejected_before_it_can_flash_solar_time() {
     let error = fix.location_at(now).expect_err("near-expiry fix cannot drive a status-bar projection");
     assert!(matches!(error, Error::GeoclueLocationExpiresSoon { remaining_seconds }
             if remaining_seconds < MINIMUM_SOLAR_CLOCK_VALIDITY.as_secs()));
+}
+
+#[test]
+fn held_fix_survives_renewal_failures_until_actual_expiry() {
+    let measured_at = UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let location = Location { latitude: 1.0, longitude: 1.0 };
+    let held = GeoclueLocationFix::new(location, 25_000.0, (1_000_000, 0))
+        .location_at(measured_at)
+        .expect("initial fix has its full lease");
+    let mut lease = FreshLocationLease::new();
+    lease.renew(held);
+
+    // Three failed renewal attempts are represented by leaving the actor-owned
+    // lease untouched. The status remains available through the exact expiry.
+    for retry_offset in [180, 200, 240, 299, 300] {
+        assert_eq!(
+            lease
+                .current_at(measured_at + Duration::from_secs(retry_offset))
+                .expect("failed renewal retains a still-valid fix")
+                .location(),
+            location
+        );
+    }
+    assert!(
+        lease.current_at(measured_at + Duration::from_secs(301)).is_none(),
+        "the held fix becomes unavailable only after its actual expiry"
+    );
+}
+
+#[test]
+fn insufficient_lifetime_replacement_does_not_displace_held_fix() {
+    let measured_at = UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let held_location = Location { latitude: 1.0, longitude: 1.0 };
+    let mut lease = FreshLocationLease::new();
+    lease.renew(
+        GeoclueLocationFix::new(held_location, 25_000.0, (1_000_000, 0))
+            .location_at(measured_at)
+            .expect("initial fix is accepted"),
+    );
+
+    let renewal_time = measured_at + MAX_LOCATION_AGE - MINIMUM_SOLAR_CLOCK_VALIDITY;
+    let cached_replacement =
+        GeoclueLocationFix::new(Location { latitude: 2.0, longitude: 2.0 }, 25_000.0, (1_000_000, 0));
+    assert!(cached_replacement.location_at(renewal_time + Duration::from_secs(1)).is_err());
+    assert_eq!(
+        lease
+            .current_at(renewal_time + Duration::from_secs(1))
+            .expect("rejected replacement cannot clear held fix")
+            .location(),
+        held_location
+    );
 }
