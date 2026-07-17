@@ -8,6 +8,8 @@
 
 use thiserror::Error as ThisError;
 
+use crate::geoclue::GeoclueLocationSource;
+
 /// The crate's error type.
 #[derive(Debug, ThisError)]
 pub enum Error {
@@ -54,6 +56,14 @@ pub enum Error {
     /// GeoClue returned a location whose measurement timestamp is not usable.
     #[error("geoclue returned an invalid location timestamp")]
     GeoclueInvalidTimestamp,
+
+    /// GeoClue did not establish a physical source suitable for solar use.
+    #[error("geoclue location source rejected for solar use: {location_source}")]
+    GeoclueLocationSourceRejected { location_source: GeoclueLocationSource },
+
+    /// GeoClue's physical fix is too uncertain for solar use.
+    #[error("geoclue location accuracy is too low for solar use ({accuracy_meters}m)")]
+    GeoclueLocationAccuracyTooLow { accuracy_meters: u64 },
 
     /// GeoClue returned a location older than Chroma's freshness boundary.
     #[error("geoclue location is stale ({age_seconds}s old)")]

@@ -207,17 +207,18 @@ write back to those source paths.
 | `theme` | fixed slot `current` | rkyv archive of `ThemeMode` |
 | `warmth` | fixed slot `current` | rkyv archive of `WarmthState` (level + custom kelvin override) |
 | `brightness` | fixed slot `current` | rkyv archive of `BrightnessState` |
-| `location` | fixed slot `last_known` | rkyv archive of `(Latitude, Longitude)` |
+| `trusted_location` | fixed slot `last_known` | rkyv archive of a source-authorized physical `(Latitude, Longitude)` |
 | `meta` | fixed slot `version` | `(schema_version, wire_version)` |
 
 Every transition is one redb write transaction. Redb-write
 happens **before** the hardware write so a crash mid-apply
 leaves redb in the new state and the next boot reapplies. The
-schedule engine also persists last-known geolocation after a
-successful geoclue refresh so daemon startup can perform immediate
-civil-trigger reconciliation from the last known position while a
-fresh geolocation request runs separately. The version-skew guard at
-boot hard-fails on mismatch.
+schedule engine also persists only a source-authorized,
+accuracy-bounded physical geolocation after a successful GeoClue refresh so
+daemon startup can perform immediate civil-trigger reconciliation from the last
+known trusted position while a fresh geolocation request runs separately.
+Legacy unqualified location records are not an authority surface. The
+version-skew guard at boot hard-fails on mismatch.
 
 ## Boundary contracts
 

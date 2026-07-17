@@ -15,13 +15,16 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::brightness::BrightnessPercent;
 use crate::error::{Error, Result};
+use crate::geoclue::FreshGeoclueLocation;
 use crate::theme::ThemeMode;
 use crate::warmth::KelvinTemperature;
 
 const THEME_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("theme");
 const WARMTH_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("warmth");
 const BRIGHTNESS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("brightness");
-const LOCATION_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("location");
+// This distinct table intentionally does not read the former unqualified
+// `location` records: a legacy coordinate cannot prove it was physically measured.
+const LOCATION_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("trusted_location");
 const CURRENT_KEY: &str = "current";
 
 /// The daemon's current visual state.
@@ -32,7 +35,7 @@ pub struct StoredVisualState {
     pub percent: BrightnessPercent,
 }
 
-/// Last geoclue position known to the schedule engine.
+/// Last source-authorized GeoClue position known to the schedule engine.
 #[derive(Debug, Clone, Copy, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StoredLocation {
     pub latitude: f64,
@@ -222,14 +225,14 @@ impl Message<RecordBrightness> for StateStore {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RecordLocation {
-    pub location: StoredLocation,
+    pub trusted_location: FreshGeoclueLocation,
 }
 
 impl Message<RecordLocation> for StateStore {
     type Reply = Result<()>;
 
     async fn handle(&mut self, message: RecordLocation, _context: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        self.record_location(message.location)
+        self.record_location(message.trusted_location.location())
     }
 }
 

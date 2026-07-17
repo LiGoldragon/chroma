@@ -3,8 +3,9 @@
 use std::time::{Duration, UNIX_EPOCH};
 
 use chroma::{
-    Error, FreshLocationLease, GeoclueLocationFix, GeoclueLocationUpdate, GeoclueLocationUpdateAwaiter, Location,
-    MAX_LOCATION_AGE, MINIMUM_SOLAR_CLOCK_VALIDITY,
+    Error, FreshLocationLease, GeoclueLocationFix, GeoclueLocationSource, GeoclueLocationUpdate,
+    GeoclueLocationUpdateAwaiter, Location, MAX_LOCATION_AGE, MAX_SOLAR_LOCATION_ACCURACY_METERS,
+    MINIMUM_SOLAR_CLOCK_VALIDITY, SolarLocationQuality,
 };
 use futures_util::stream;
 use tokio::sync::oneshot;
@@ -16,6 +17,10 @@ fn location_update(path: &str) -> GeoclueLocationUpdate {
         OwnedObjectPath::try_from("/").expect("root object path is valid D-Bus syntax"),
         OwnedObjectPath::try_from(path).expect("test location object path is valid D-Bus syntax"),
     ))
+}
+
+fn physical_fix(source: GeoclueLocationSource, location: Location, timestamp: u64) -> GeoclueLocationFix {
+    GeoclueLocationFix::with_source(location, source, 100.0, (timestamp, 0))
 }
 
 #[tokio::test]
@@ -67,29 +72,69 @@ fn root_location_update_is_rejected_before_any_location_property_read() {
 #[test]
 fn stale_geoclue_fix_is_rejected_before_solar_schedule_projection() {
     let now = UNIX_EPOCH + MAX_LOCATION_AGE + Duration::from_secs(1);
-    let fix = GeoclueLocationFix::new(Location { latitude: 0.0, longitude: 0.0 }, 25_000.0, (0, 0));
+    let fix = physical_fix(GeoclueLocationSource::Gnss, Location { latitude: 0.0, longitude: 0.0 }, 0);
 
     let error = fix.location_at(now).expect_err("stale fix cannot select solar waypoints");
     assert!(matches!(error, Error::GeoclueLocationStale { age_seconds } if age_seconds > MAX_LOCATION_AGE.as_secs()));
 }
 
 #[test]
-fn fresh_geoclue_fix_is_accepted_for_solar_schedule_projection() {
+fn ip_fallback_cannot_update_authoritative_lease_or_solar_schedule() {
     let measured_at = UNIX_EPOCH + Duration::from_secs(1_000_000);
-    let location = Location { latitude: 1.0, longitude: 1.0 };
-    let fix = GeoclueLocationFix::new(location, 25_000.0, (1_000_000, 0));
+    let source = GeoclueLocationSource::from_description("ipf fallback (from WiFi data)");
+    let fallback = physical_fix(source, Location { latitude: 1.0, longitude: 1.0 }, 1_000_000);
+    let lease = FreshLocationLease::new();
 
     assert_eq!(
-        fix.location_at(measured_at + Duration::from_secs(1)).expect("fresh fix is accepted").location(),
-        location
+        fallback.solar_quality(),
+        SolarLocationQuality::RejectedSource(GeoclueLocationSource::InternetProtocolFallback)
     );
+    let error = fallback.location_at(measured_at).expect_err("IP fallback cannot become an authoritative solar fix");
+    assert!(matches!(
+        error,
+        Error::GeoclueLocationSourceRejected { location_source: GeoclueLocationSource::InternetProtocolFallback }
+    ));
+    assert!(lease.current_at(measured_at).is_none(), "rejected source leaves the authoritative lease empty");
+    assert!(
+        fallback.location_at(measured_at).ok().map(|location| location.location()).is_none(),
+        "the solar schedule has no location to project from a rejected source"
+    );
+}
+
+#[test]
+fn physical_wifi_and_gnss_fixes_can_authorize_solar_use() {
+    let measured_at = UNIX_EPOCH + Duration::from_secs(1_000_000);
+    for source in [GeoclueLocationSource::PhysicalWifi, GeoclueLocationSource::Gnss] {
+        let location = Location { latitude: 1.0, longitude: 1.0 };
+        let fix = physical_fix(source, location, 1_000_000);
+
+        assert_eq!(fix.solar_quality(), SolarLocationQuality::Authoritative(source));
+        assert_eq!(fix.location_at(measured_at).expect("physical source is usable for solar use").location(), location);
+    }
+}
+
+#[test]
+fn low_accuracy_physical_fix_is_rejected_before_solar_schedule_projection() {
+    let measured_at = UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let fix = GeoclueLocationFix::with_source(
+        Location { latitude: 1.0, longitude: 1.0 },
+        GeoclueLocationSource::PhysicalWifi,
+        MAX_SOLAR_LOCATION_ACCURACY_METERS + 1.0,
+        (1_000_000, 0),
+    );
+
+    assert_eq!(fix.solar_quality(), SolarLocationQuality::RejectedAccuracy);
+    assert!(matches!(
+        fix.location_at(measured_at),
+        Err(Error::GeoclueLocationAccuracyTooLow { accuracy_meters }) if accuracy_meters > MAX_SOLAR_LOCATION_ACCURACY_METERS as u64
+    ));
 }
 
 #[test]
 fn nearly_expired_geoclue_fix_is_rejected_before_it_can_flash_solar_time() {
     let measured_at = UNIX_EPOCH + Duration::from_secs(1_000_000);
     let now = measured_at + MAX_LOCATION_AGE - MINIMUM_SOLAR_CLOCK_VALIDITY + Duration::from_secs(1);
-    let fix = GeoclueLocationFix::new(Location { latitude: 1.0, longitude: 1.0 }, 25_000.0, (1_000_000, 0));
+    let fix = physical_fix(GeoclueLocationSource::Gnss, Location { latitude: 1.0, longitude: 1.0 }, 1_000_000);
 
     let error = fix.location_at(now).expect_err("near-expiry fix cannot drive a status-bar projection");
     assert!(matches!(error, Error::GeoclueLocationExpiresSoon { remaining_seconds }
@@ -100,14 +145,12 @@ fn nearly_expired_geoclue_fix_is_rejected_before_it_can_flash_solar_time() {
 fn held_fix_survives_renewal_failures_until_actual_expiry() {
     let measured_at = UNIX_EPOCH + Duration::from_secs(1_000_000);
     let location = Location { latitude: 1.0, longitude: 1.0 };
-    let held = GeoclueLocationFix::new(location, 25_000.0, (1_000_000, 0))
+    let held = physical_fix(GeoclueLocationSource::Gnss, location, 1_000_000)
         .location_at(measured_at)
         .expect("initial fix has its full lease");
     let mut lease = FreshLocationLease::new();
     lease.renew(held);
 
-    // Three failed renewal attempts are represented by leaving the actor-owned
-    // lease untouched. The status remains available through the exact expiry.
     for retry_offset in [180, 200, 240, 299, 300] {
         assert_eq!(
             lease
@@ -124,25 +167,28 @@ fn held_fix_survives_renewal_failures_until_actual_expiry() {
 }
 
 #[test]
-fn insufficient_lifetime_replacement_does_not_displace_held_fix() {
+fn rejected_ip_fallback_replacement_does_not_evict_a_still_valid_trusted_fix() {
     let measured_at = UNIX_EPOCH + Duration::from_secs(1_000_000);
     let held_location = Location { latitude: 1.0, longitude: 1.0 };
     let mut lease = FreshLocationLease::new();
     lease.renew(
-        GeoclueLocationFix::new(held_location, 25_000.0, (1_000_000, 0))
+        physical_fix(GeoclueLocationSource::Gnss, held_location, 1_000_000)
             .location_at(measured_at)
-            .expect("initial fix is accepted"),
+            .expect("initial trusted fix is accepted"),
     );
 
-    let renewal_time = measured_at + MAX_LOCATION_AGE - MINIMUM_SOLAR_CLOCK_VALIDITY;
-    let cached_replacement =
-        GeoclueLocationFix::new(Location { latitude: 2.0, longitude: 2.0 }, 25_000.0, (1_000_000, 0));
-    assert!(cached_replacement.location_at(renewal_time + Duration::from_secs(1)).is_err());
+    let renewal_time = measured_at + Duration::from_secs(60);
+    let rejected_replacement = physical_fix(
+        GeoclueLocationSource::InternetProtocolFallback,
+        Location { latitude: 2.0, longitude: 2.0 },
+        1_000_060,
+    );
+    assert!(matches!(
+        rejected_replacement.location_at(renewal_time),
+        Err(Error::GeoclueLocationSourceRejected { location_source: GeoclueLocationSource::InternetProtocolFallback })
+    ));
     assert_eq!(
-        lease
-            .current_at(renewal_time + Duration::from_secs(1))
-            .expect("rejected replacement cannot clear held fix")
-            .location(),
+        lease.current_at(renewal_time).expect("rejected replacement cannot clear held trusted fix").location(),
         held_location
     );
 }

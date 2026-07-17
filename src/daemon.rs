@@ -1004,7 +1004,8 @@ impl ScheduleEngine {
             Some(fresh_location) => {
                 let location = fresh_location.location();
                 if self.location != Some(location) {
-                    if let Err(error) = self.state_store.ask(RecordLocation { location }).await {
+                    if let Err(error) = self.state_store.ask(RecordLocation { trusted_location: fresh_location }).await
+                    {
                         eprintln!("chroma-daemon location persist error: {error}");
                     }
                     self.location = Some(location);
@@ -1193,12 +1194,14 @@ impl GeoclueLocator {
                 let longitude: f64 = location.get_property("Longitude").await?;
                 let accuracy_meters: f64 = location.get_property("Accuracy").await?;
                 let timestamp: (u64, u64) = location.get_property("Timestamp").await?;
-                match GeoclueLocationFix::new(Location { latitude, longitude }, accuracy_meters, timestamp)
+                let description: String = location.get_property("Description").await?;
+                let source = crate::geoclue::GeoclueLocationSource::from_description(&description);
+                match GeoclueLocationFix::with_source(Location { latitude, longitude }, source, accuracy_meters, timestamp)
                     .location_at(std::time::SystemTime::now())
                 {
                     Ok(location) => {
                         eprintln!(
-                            "chroma-daemon accepted fresh GeoClue location (accuracy: {:.0}m)",
+                            "chroma-daemon accepted fresh GeoClue location from {source} (accuracy: {:.0}m)",
                             accuracy_meters
                         );
                         break Ok(location);
@@ -1212,6 +1215,12 @@ impl GeoclueLocator {
                         eprintln!(
                             "chroma-daemon retained held location while cached GeoClue fix was {age_seconds}s old"
                         );
+                    }
+                    Err(Error::GeoclueLocationSourceRejected { location_source: source }) => {
+                        eprintln!("chroma-daemon rejected GeoClue {source} source for solar use");
+                    }
+                    Err(Error::GeoclueLocationAccuracyTooLow { accuracy_meters }) => {
+                        eprintln!("chroma-daemon rejected GeoClue location accuracy ({accuracy_meters}m) for solar use");
                     }
                     Err(error) => break Err(error),
                 }

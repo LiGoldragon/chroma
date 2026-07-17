@@ -4,6 +4,7 @@
 //! subscribes to `LocationUpdated` before `Start`, then treats the signal's
 //! new object path as the authority for the location-property read.
 
+use std::fmt::{Display, Formatter};
 use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -20,8 +21,83 @@ pub const MAX_LOCATION_AGE: Duration = Duration::from_secs(300);
 /// attempt plus several bounded retries. Shorter-lived cached fixes are not
 /// allowed to displace a still-valid held fix.
 pub const MINIMUM_SOLAR_CLOCK_VALIDITY: Duration = Duration::from_secs(120);
+
+/// Maximum measurement uncertainty that may drive solar events or apparent
+/// solar time. One kilometre keeps the location contribution to solar-time
+/// projection small while still allowing physical Wi-Fi positioning.
+pub const MAX_SOLAR_LOCATION_ACCURACY_METERS: f64 = 1_000.0;
+
 const SOLAR_CLOCK_REFRESH_LEAD: Duration = MINIMUM_SOLAR_CLOCK_VALIDITY;
 const MAX_SOLAR_CLOCK_REFRESH_DELAY: Duration = Duration::from_secs(240);
+
+/// The provenance category Chroma can establish from GeoClue's description.
+///
+/// The original description remains at the D-Bus boundary: diagnostics expose
+/// this closed category, never provider text or a location value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeoclueLocationSource {
+    /// A direct physical Wi-Fi measurement.
+    PhysicalWifi,
+    /// A GNSS/GPS measurement.
+    Gnss,
+    /// A network provider's Internet-protocol fallback rather than a physical
+    /// measurement. This includes BeaconDB's GeoClue IP fallback.
+    InternetProtocolFallback,
+    /// A provider description that does not establish a physical source.
+    Unrecognized,
+}
+
+impl GeoclueLocationSource {
+    /// Classify the provider description once at the GeoClue boundary.
+    pub fn from_description(description: &str) -> Self {
+        let description = description.trim().to_ascii_lowercase();
+        if description.contains("ipf fallback") || description.contains("ip fallback") || description.contains("geoip")
+        {
+            Self::InternetProtocolFallback
+        } else if description.contains("gnss") || description.contains("gps") {
+            Self::Gnss
+        } else if description.contains("wifi") || description.contains("wi-fi") {
+            Self::PhysicalWifi
+        } else {
+            Self::Unrecognized
+        }
+    }
+}
+
+impl Display for GeoclueLocationSource {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PhysicalWifi => formatter.write_str("physical Wi-Fi"),
+            Self::Gnss => formatter.write_str("GNSS"),
+            Self::InternetProtocolFallback => formatter.write_str("IP fallback"),
+            Self::Unrecognized => formatter.write_str("unrecognized"),
+        }
+    }
+}
+
+/// The closed solar-use policy result for one GeoClue fix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SolarLocationQuality {
+    /// A physical source with bounded enough uncertainty to drive solar use.
+    Authoritative(GeoclueLocationSource),
+    /// The source did not establish a physical location measurement.
+    RejectedSource(GeoclueLocationSource),
+    /// The source was physical, but its uncertainty is too large for solar use.
+    RejectedAccuracy,
+}
+
+impl SolarLocationQuality {
+    /// Convert the policy classification into the typed boundary error.
+    pub fn authorize(self, accuracy_meters: f64) -> Result<()> {
+        match self {
+            Self::Authoritative(_) => Ok(()),
+            Self::RejectedSource(location_source) => Err(Error::GeoclueLocationSourceRejected { location_source }),
+            Self::RejectedAccuracy => {
+                Err(Error::GeoclueLocationAccuracyTooLow { accuracy_meters: accuracy_meters.round() as u64 })
+            }
+        }
+    }
+}
 
 /// The object paths carried by GeoClue's `LocationUpdated` signal.
 #[derive(Debug)]
@@ -71,13 +147,14 @@ where
 #[derive(Debug, Clone, Copy)]
 pub struct GeoclueLocationFix {
     location: Location,
+    source: GeoclueLocationSource,
     accuracy_meters: f64,
     timestamp_seconds: u64,
     timestamp_microseconds: u64,
 }
 
-/// A fix that passed GeoClue freshness and accuracy validation.
-#[derive(Debug, Clone, Copy)]
+/// A fix that passed GeoClue source, accuracy, and freshness validation.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FreshGeoclueLocation {
     location: Location,
     expires_at: SystemTime,
@@ -85,8 +162,9 @@ pub struct FreshGeoclueLocation {
 
 /// The schedule actor's held authoritative location lease.
 ///
-/// Failed or insufficient-lifetime renewals leave this lease unchanged. That
-/// makes renewal failure the normal case until the held fix actually expires.
+/// Failed, low-quality, and insufficient-lifetime renewals leave this lease
+/// unchanged. That makes rejected renewal the normal case until the held fix
+/// actually expires.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FreshLocationLease {
     held: Option<FreshGeoclueLocation>,
@@ -137,16 +215,41 @@ impl FreshGeoclueLocation {
 }
 
 impl GeoclueLocationFix {
-    /// Construct a fix from the GeoClue location object's properties.
+    /// Construct a fix with an unrecognized source. It is retained for source
+    /// compatibility, but cannot authorize solar use.
     pub fn new(location: Location, accuracy_meters: f64, timestamp: (u64, u64)) -> Self {
-        Self { location, accuracy_meters, timestamp_seconds: timestamp.0, timestamp_microseconds: timestamp.1 }
+        Self::with_source(location, GeoclueLocationSource::Unrecognized, accuracy_meters, timestamp)
     }
 
-    /// Validate metadata before allowing a fix to affect solar scheduling.
+    /// Construct a fix from GeoClue's location properties and classified source.
+    pub fn with_source(
+        location: Location,
+        source: GeoclueLocationSource,
+        accuracy_meters: f64,
+        timestamp: (u64, u64),
+    ) -> Self {
+        Self { location, source, accuracy_meters, timestamp_seconds: timestamp.0, timestamp_microseconds: timestamp.1 }
+    }
+
+    /// Classify this fix against the closed solar authority policy.
+    pub fn solar_quality(self) -> SolarLocationQuality {
+        match self.source {
+            GeoclueLocationSource::PhysicalWifi | GeoclueLocationSource::Gnss
+                if self.accuracy_meters <= MAX_SOLAR_LOCATION_ACCURACY_METERS =>
+            {
+                SolarLocationQuality::Authoritative(self.source)
+            }
+            GeoclueLocationSource::PhysicalWifi | GeoclueLocationSource::Gnss => SolarLocationQuality::RejectedAccuracy,
+            source => SolarLocationQuality::RejectedSource(source),
+        }
+    }
+
+    /// Validate source, accuracy, and freshness before allowing a fix to affect solar scheduling.
     pub fn location_at(self, now: SystemTime) -> Result<FreshGeoclueLocation> {
         if !self.accuracy_meters.is_finite() || self.accuracy_meters < 0.0 {
             return Err(Error::GeoclueInvalidAccuracy);
         }
+        self.solar_quality().authorize(self.accuracy_meters)?;
         if self.timestamp_microseconds >= 1_000_000 {
             return Err(Error::GeoclueInvalidTimestamp);
         }
