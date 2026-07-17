@@ -321,6 +321,25 @@ await_ghostty_background() {
   fail "ghostty config did not reach background $expected_background"
 }
 
+await_ghostty_reload_count() {
+  local expected_count="$1"
+  local call_log="$artifact_root/fake-ghostty.calls"
+  local deadline=$((SECONDS + 5))
+  local remaining
+  local observed_count
+
+  while ((SECONDS < deadline)); do
+    observed_count=$(rg -c '^Activate reload-config$' "$call_log" 2>/dev/null || true)
+    if [[ "${observed_count:-0}" == "$expected_count" ]]; then
+      return 0
+    fi
+    remaining=$((deadline - SECONDS))
+    inotifywait -q -t "$remaining" -e create -e modify -e close_write "$artifact_root" >/dev/null || true
+  done
+
+  fail "Ghostty reload action count did not reach $expected_count"
+}
+
 gamma_ready="$artifact_root/fake-gamma.ready"
 export CHROMA_SANDBOX_FAKE_GAMMA_READY="$gamma_ready"
 chroma-fake-gamma-service > "$artifact_root/fake-gamma.log" 2>&1 &
@@ -342,10 +361,13 @@ chroma 'GetState' > "$artifact_root/get-state-before.nota"
 
 chroma '(SetTheme Light)' > "$artifact_root/set-theme-light.nota"
 await_ghostty_background "#faf5f0"
+await_ghostty_reload_count 1
 cp "$XDG_CONFIG_HOME/ghostty/config.ghostty" "$artifact_root/ghostty-light.config"
 
+chroma '(SetTheme Light)' > "$artifact_root/set-theme-light-unchanged.nota"
 chroma '(SetTheme Dark)' > "$artifact_root/set-theme-dark.nota"
 await_ghostty_background "#000000"
+await_ghostty_reload_count 2
 cp "$XDG_CONFIG_HOME/ghostty/config.ghostty" "$artifact_root/ghostty-dark.config"
 
 case "${CHROMA_SANDBOX_VISIBLE_THEME:-Dark}" in
@@ -363,6 +385,7 @@ case "${CHROMA_SANDBOX_VISIBLE_THEME:-Dark}" in
 esac
 
 rg -q '^Accepted$' "$artifact_root/set-theme-light.nota"
+rg -q '^Accepted$' "$artifact_root/set-theme-light-unchanged.nota"
 rg -q '^Accepted$' "$artifact_root/set-theme-dark.nota"
 rg -q '^Activate reload-config$' "$artifact_root/fake-ghostty.calls"
 [[ -s "$XDG_STATE_HOME/chroma/state.redb" ]] || fail "state.redb was not written"

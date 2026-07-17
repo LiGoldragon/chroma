@@ -1,10 +1,11 @@
 use chroma::{
-    ApplyTheme, PiThemeControl, ThemeAdapters, ThemeApplier, ThemeAxis, ThemeConcern, ThemeMode, ThemePalette,
-    ThemePalettes, ThemeSchedule,
+    ApplyTheme, GhosttyConfigChange, GhosttyConfigFile, PiThemeControl, ThemeAdapters, ThemeApplier, ThemeAxis,
+    ThemeConcern, ThemeMode, ThemePalette, ThemePalettes, ThemeSchedule,
 };
 use kameo::actor::ActorRef;
 use nota::{NotaDecode, NotaEncode, NotaSource};
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixListener;
@@ -197,6 +198,42 @@ async fn read_single_theme_message(listener: UnixListener) -> String {
     let mut message = String::new();
     stream.read_to_string(&mut message).await.expect("read Pi theme control message");
     message
+}
+
+#[tokio::test]
+async fn ghostty_config_file_skips_equal_content_without_writing() {
+    let fixture = ThemeApplierFixture::new();
+    let directory = fixture.temporary_directory.path().join("ghostty");
+    let config_path = directory.join("config.ghostty");
+    fs::create_dir_all(&directory).expect("create Ghostty config directory");
+    fs::write(&config_path, "background = #000000\n").expect("write current Ghostty config");
+
+    let original_permissions = fs::metadata(&directory).expect("read Ghostty config directory metadata").permissions();
+    let mut read_only_permissions = original_permissions.clone();
+    read_only_permissions.set_mode(0o500);
+    fs::set_permissions(&directory, read_only_permissions).expect("make Ghostty config directory unwritable");
+    let change = GhosttyConfigFile::at(&config_path).replace_if_changed("background = #000000\n".into()).await;
+    fs::set_permissions(&directory, original_permissions).expect("restore Ghostty config directory permissions");
+
+    assert_eq!(change.expect("equal Ghostty config does not write"), GhosttyConfigChange::Unchanged);
+    assert_eq!(fs::read_to_string(&config_path).expect("read unchanged Ghostty config"), "background = #000000\n");
+}
+
+#[tokio::test]
+async fn ghostty_config_file_atomically_replaces_different_content() {
+    let fixture = ThemeApplierFixture::new();
+    let directory = fixture.temporary_directory.path().join("ghostty");
+    let config_path = directory.join("config.ghostty");
+    fs::create_dir_all(&directory).expect("create Ghostty config directory");
+    fs::write(&config_path, "background = #000000\n").expect("write current Ghostty config");
+
+    let change = GhosttyConfigFile::at(&config_path)
+        .replace_if_changed("background = #faf5f0\n".into())
+        .await
+        .expect("replace different Ghostty config");
+
+    assert_eq!(change, GhosttyConfigChange::Replaced);
+    assert_eq!(fs::read_to_string(&config_path).expect("read replaced Ghostty config"), "background = #faf5f0\n");
 }
 
 #[test]

@@ -44,8 +44,9 @@ pub use state::{
     StoredLocation, StoredVisualState,
 };
 pub use theme::{
-    ApplyTheme, GhosttyConfigTemplates, PiThemeControl, PiThemeControlRegistryDirectory, ThemeAdapters, ThemeApplier,
-    ThemeAxis, ThemeConcern, ThemeMode, ThemePalette, ThemePalettes, ThemeSchedule, ThemeWaypoint,
+    ApplyTheme, GhosttyConfigChange, GhosttyConfigFile, GhosttyConfigTemplates, PiThemeControl,
+    PiThemeControlRegistryDirectory, ThemeAdapters, ThemeApplier, ThemeAxis, ThemeConcern, ThemeMode, ThemePalette,
+    ThemePalettes, ThemeSchedule, ThemeWaypoint,
 };
 pub use time::{LocalHour, LocalMinute, RampDuration, RampTrigger, RelativeSolarOffset, SignedMinutes};
 pub use warmth::{KelvinTemperature, WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint};

@@ -76,11 +76,12 @@ short timeout failures are logged by that concern without failing the
 theme switch. Ghostty is a native
 application concern:
 Chroma reads the complete Ghostty config template for the target
-mode, copies it to the mutable `config.ghostty` file under the
-user config directory, then sends the running Ghostty application
-one bounded `org.gtk.Actions` `reload-config` DBus action so
-existing Ghostty windows reload their own config. The CLI does not
-write live terminal palette sequences. Non-Ghostty terminals
+mode and compares it with the mutable `config.ghostty` file under
+the user config directory. Only changed content is atomically
+replaced, followed by one bounded `org.gtk.Actions` `reload-config`
+DBus action so existing Ghostty windows reload their own config.
+Equal content causes neither a replacement nor a reload. The CLI
+does not write live terminal palette sequences. Non-Ghostty terminals
 converge only through a future explicit per-window protocol, or
 when their own startup path reads the persisted state.
 Warmth and brightness support both instant (`SetWarmth`,
@@ -253,9 +254,10 @@ their own terminal-local integration asks for an update.
 
 Ghostty is the named exception because it exposes a native
 application action for config reload. Chroma reads a complete
-read-only template, copies it to the mutable `config.ghostty`, then
-sends that single Ghostty-owned DBus action; it does not enumerate
-Ghostty windows or panes and does not emit OSC into their PTYs.
+read-only template, atomically replaces the mutable `config.ghostty`
+only when its content changed, then sends that single Ghostty-owned
+DBus action; it does not enumerate Ghostty windows or panes and does
+not emit OSC into their PTYs.
 
 Future improvement: replace full-template replacement with a
 Ghostty config codec/parser that can update only the theme keys

@@ -6,7 +6,7 @@
 
 use core::fmt;
 use std::collections::HashMap;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration as StandardDuration;
@@ -104,6 +104,72 @@ impl GhosttyConfigTemplates {
             ThemeMode::Dark => &self.dark,
             ThemeMode::Light => &self.light,
         }
+    }
+}
+
+/// The result of applying desired content to Ghostty's mutable config file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhosttyConfigChange {
+    /// The destination already held the desired content.
+    Unchanged,
+    /// The destination was atomically replaced with the desired content.
+    Replaced,
+}
+
+/// Ghostty's mutable runtime config file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GhosttyConfigFile {
+    path: PathBuf,
+}
+
+impl GhosttyConfigFile {
+    /// Name the mutable config file that receives complete native templates.
+    pub fn at(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+
+    /// Atomically replace the file only when its content differs.
+    pub async fn replace_if_changed(&self, desired_contents: String) -> Result<GhosttyConfigChange> {
+        let current_contents = match tokio::fs::read_to_string(&self.path).await {
+            Ok(contents) => Some(contents),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        };
+        if current_contents.as_deref() == Some(desired_contents.as_str()) {
+            return Ok(GhosttyConfigChange::Unchanged);
+        }
+        let replacement = GhosttyConfigReplacement::new(self.path.clone(), desired_contents);
+        replacement.replace().await?;
+        Ok(GhosttyConfigChange::Replaced)
+    }
+}
+
+/// A complete desired Ghostty config ready for atomic replacement.
+struct GhosttyConfigReplacement {
+    destination: PathBuf,
+    contents: String,
+}
+
+impl GhosttyConfigReplacement {
+    fn new(destination: PathBuf, contents: String) -> Self {
+        Self { destination, contents }
+    }
+
+    async fn replace(self) -> Result<()> {
+        tokio::task::spawn_blocking(move || self.replace_atomically())
+            .await
+            .map_err(|error| Error::Daemon { message: format!("Ghostty config replacement task failed: {error}") })?
+    }
+
+    fn replace_atomically(self) -> Result<()> {
+        let directory = self.destination.parent().ok_or_else(|| Error::Config {
+            message: format!("Ghostty config path {} has no parent directory", self.destination.display()),
+        })?;
+        let mut temporary_file = tempfile::NamedTempFile::new_in(directory)?;
+        temporary_file.write_all(self.contents.as_bytes())?;
+        temporary_file.as_file().sync_all()?;
+        temporary_file.persist(&self.destination).map_err(|error| error.error)?;
+        Ok(())
     }
 }
 
@@ -772,9 +838,11 @@ impl GhosttyThemeConcern {
     async fn apply(&self, mode: ThemeMode) -> Result<()> {
         let directory = config_home()?.join("ghostty");
         tokio::fs::create_dir_all(&directory).await?;
-        let config = tokio::fs::read_to_string(self.templates.template_for(mode)).await?;
-        tokio::fs::write(directory.join("config.ghostty"), config).await?;
-        self.reloader.reload().await?;
+        let desired_config = tokio::fs::read_to_string(self.templates.template_for(mode)).await?;
+        let config_file = GhosttyConfigFile::at(directory.join("config.ghostty"));
+        if config_file.replace_if_changed(desired_config).await? == GhosttyConfigChange::Replaced {
+            self.reloader.reload().await?;
+        }
         Ok(())
     }
 }
