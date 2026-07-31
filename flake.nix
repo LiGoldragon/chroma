@@ -1,5 +1,5 @@
 {
-  description = "Chroma — one Rust daemon for theme, warmth, and brightness, controlled via NOTA.";
+  description = "Chroma — one Rust daemon for theme, warmth, and brightness, controlled via DOTOS.";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";

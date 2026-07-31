@@ -1,10 +1,10 @@
 //! [`Request`] — what the CLI sends to the daemon.
 //!
-//! Parses from a single NOTA record on argv (the `chroma` CLI's
+//! Parses from a single DOTOS record on argv (the `chroma` CLI's
 //! one positional arg). Travels on the wire as a length-prefixed
 //! rkyv archive over the daemon's UDS.
 
-use nota::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode, NotaSource};
+use dotos::{Block, Delimiter, DotosBlock, DotosDecode, DotosDecodeError, DotosEncode, DotosSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::brightness::{BrightnessLevel, BrightnessPercent};
@@ -58,14 +58,14 @@ pub enum Request {
 }
 
 impl Request {
-    /// Parse a single NOTA record into a typed request.
-    pub fn from_nota(text: &str) -> Result<Self> {
-        Ok(NotaSource::new(text).parse()?)
+    /// Parse a single DOTOS record into a typed request.
+    pub fn from_dotos(text: &str) -> Result<Self> {
+        Ok(DotosSource::new(text).parse()?)
     }
 
-    /// Render this request as a NOTA record.
-    pub fn to_nota(&self) -> Result<String> {
-        Ok(NotaEncode::to_nota(self))
+    /// Render this request as a DOTOS record.
+    pub fn to_dotos(&self) -> Result<String> {
+        Ok(DotosEncode::to_dotos(self))
     }
 
     /// Archive into rkyv bytes for the wire.
@@ -80,7 +80,7 @@ impl Request {
         rkyv::from_bytes::<Self, rkyv::rancor::Error>(bytes).map_err(|err| Error::RkyvCodec(err.to_string()))
     }
 
-    fn decode_unit(tag: &str) -> std::result::Result<Self, NotaDecodeError> {
+    fn decode_unit(tag: &str) -> std::result::Result<Self, DotosDecodeError> {
         match tag {
             "GetTheme" => Ok(Self::GetTheme),
             "GetWarmth" => Ok(Self::GetWarmth),
@@ -89,13 +89,11 @@ impl Request {
             "InterruptBrightness" => Ok(Self::InterruptBrightness),
             "GetState" => Ok(Self::GetState),
             "GetSolarClock" => Ok(Self::GetSolarClock),
-            other => Err(NotaDecodeError::UnknownVariant { enum_name: "Request", variant: other.to_string() }),
+            other => Err(DotosDecodeError::UnknownVariant { enum_name: "Request", variant: other.to_string() }),
         }
     }
 
-    fn decode_tagged(children: &[Block]) -> std::result::Result<Self, NotaDecodeError> {
-        let tag = Self::tag(children)?;
-        let payload = &children[1..];
+    fn decode_tagged(tag: &str, payload: &[Block]) -> std::result::Result<Self, DotosDecodeError> {
         match tag {
             "GetTheme"
             | "GetWarmth"
@@ -155,77 +153,72 @@ impl Request {
                     duration: Self::decode_payload(payload, 1)?,
                 })
             }
-            other => Err(NotaDecodeError::UnknownVariant { enum_name: "Request", variant: other.to_string() }),
+            other => Err(DotosDecodeError::UnknownVariant { enum_name: "Request", variant: other.to_string() }),
         }
-    }
-
-    fn tag(children: &[Block]) -> std::result::Result<&str, NotaDecodeError> {
-        children
-            .first()
-            .and_then(Block::demote_to_string)
-            .ok_or(NotaDecodeError::ExpectedAtom { type_name: "Request variant" })
     }
 
     fn expect_payload_count(
         _tag: &str,
         payload: &[Block],
         expected: usize,
-    ) -> std::result::Result<(), NotaDecodeError> {
+    ) -> std::result::Result<(), DotosDecodeError> {
         if payload.len() == expected {
             Ok(())
         } else {
-            Err(NotaDecodeError::ExpectedRootCount { type_name: "Request payload", expected, found: payload.len() })
+            Err(DotosDecodeError::ExpectedRootCount { type_name: "Request payload", expected, found: payload.len() })
         }
     }
 
-    fn decode_payload<Value: NotaDecode>(
+    fn decode_payload<Value: DotosDecode>(
         payload: &[Block],
         index: usize,
-    ) -> std::result::Result<Value, NotaDecodeError> {
-        Value::from_nota_block(&payload[index])
+    ) -> std::result::Result<Value, DotosDecodeError> {
+        Value::from_dotos_block(&payload[index])
     }
 
     fn tagged(tag: &'static str, payload: impl IntoIterator<Item = String>) -> String {
-        let mut fields = Vec::new();
-        fields.push(tag.to_owned());
-        fields.extend(payload);
-        Delimiter::Parenthesis.wrap(fields)
+        format!("{tag}.{}", Delimiter::Parenthesis.wrap(payload))
     }
 }
 
-impl NotaDecode for Request {
-    fn from_nota_block(block: &Block) -> std::result::Result<Self, NotaDecodeError> {
+impl DotosDecode for Request {
+    fn from_dotos_block(block: &Block) -> std::result::Result<Self, DotosDecodeError> {
         if let Some(tag) = block.demote_to_string() {
             return Self::decode_unit(tag);
         }
-        let children = NotaBlock::new(block).expect_delimited(Delimiter::Parenthesis, "Request")?;
-        Self::decode_tagged(children)
+        let (head, payload) = block.as_application().ok_or(DotosDecodeError::ExpectedDelimited {
+            type_name: "Request",
+            delimiter: "Request.(payload) application",
+        })?;
+        let tag = head.demote_to_string().ok_or(DotosDecodeError::ExpectedAtom { type_name: "Request variant" })?;
+        let payload = DotosBlock::new(payload).expect_delimited(Delimiter::Parenthesis, "Request")?;
+        Self::decode_tagged(tag, payload)
     }
 }
 
-impl NotaEncode for Request {
-    fn to_nota(&self) -> String {
+impl DotosEncode for Request {
+    fn to_dotos(&self) -> String {
         match self {
-            Self::SetTheme { mode } => Self::tagged("SetTheme", [mode.to_nota()]),
+            Self::SetTheme { mode } => Self::tagged("SetTheme", [mode.to_dotos()]),
             Self::GetTheme => "GetTheme".to_owned(),
-            Self::SetWarmth { level } => Self::tagged("SetWarmth", [level.to_nota()]),
-            Self::SetWarmthKelvin { kelvin } => Self::tagged("SetWarmthKelvin", [kelvin.to_nota()]),
+            Self::SetWarmth { level } => Self::tagged("SetWarmth", [level.to_dotos()]),
+            Self::SetWarmthKelvin { kelvin } => Self::tagged("SetWarmthKelvin", [kelvin.to_dotos()]),
             Self::GetWarmth => "GetWarmth".to_owned(),
             Self::StartWarmthRamp { target, duration } => {
-                Self::tagged("StartWarmthRamp", [target.to_nota(), duration.to_nota()])
+                Self::tagged("StartWarmthRamp", [target.to_dotos(), duration.to_dotos()])
             }
             Self::StartWarmthRampKelvin { target, duration } => {
-                Self::tagged("StartWarmthRampKelvin", [target.to_nota(), duration.to_nota()])
+                Self::tagged("StartWarmthRampKelvin", [target.to_dotos(), duration.to_dotos()])
             }
             Self::InterruptWarmth => "InterruptWarmth".to_owned(),
-            Self::SetBrightness { level } => Self::tagged("SetBrightness", [level.to_nota()]),
-            Self::SetBrightnessPercent { percent } => Self::tagged("SetBrightnessPercent", [percent.to_nota()]),
+            Self::SetBrightness { level } => Self::tagged("SetBrightness", [level.to_dotos()]),
+            Self::SetBrightnessPercent { percent } => Self::tagged("SetBrightnessPercent", [percent.to_dotos()]),
             Self::GetBrightness => "GetBrightness".to_owned(),
             Self::StartBrightnessRamp { target, duration } => {
-                Self::tagged("StartBrightnessRamp", [target.to_nota(), duration.to_nota()])
+                Self::tagged("StartBrightnessRamp", [target.to_dotos(), duration.to_dotos()])
             }
             Self::StartBrightnessRampPercent { target, duration } => {
-                Self::tagged("StartBrightnessRampPercent", [target.to_nota(), duration.to_nota()])
+                Self::tagged("StartBrightnessRampPercent", [target.to_dotos(), duration.to_dotos()])
             }
             Self::InterruptBrightness => "InterruptBrightness".to_owned(),
             Self::GetState => "GetState".to_owned(),

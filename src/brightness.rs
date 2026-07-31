@@ -11,7 +11,7 @@
 
 use core::fmt;
 
-use nota::{Block, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode};
+use dotos::{Block, DotosBlock, DotosDecode, DotosDecodeError, DotosEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::error::{Error, Result};
@@ -19,7 +19,7 @@ use crate::time::{RampDuration, RampTrigger};
 
 /// A discrete brightness level on the daemon's standard ladder.
 #[derive(
-    Debug, Default, Clone, Copy, PartialEq, Eq, Hash, NotaDecode, NotaEncode, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug, Default, Clone, Copy, PartialEq, Eq, Hash, DotosDecode, DotosEncode, Archive, RkyvSerialize, RkyvDeserialize,
 )]
 pub enum BrightnessLevel {
     Dim,
@@ -91,7 +91,7 @@ impl fmt::Display for BrightnessLevel {
 ///
 /// wl-gammarelay-rs's `Brightness` DBus property is a `d`
 /// (double) in `[0.0, 1.0]`; convert with [`Self::as_fraction`].
-/// All construction paths — including [`NotaDecode`] — clamp to
+/// All construction paths — including [`DotosDecode`] — clamp to
 /// `[MIN, MAX]` = `[0, 100]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct BrightnessPercent(u8);
@@ -148,17 +148,17 @@ impl fmt::Display for BrightnessPercent {
     }
 }
 
-// Hand-written NOTA codec — routes decode through `new` so
+// Hand-written DOTOS codec — routes decode through `new` so
 // out-of-range values clamp consistently.
-impl NotaEncode for BrightnessPercent {
-    fn to_nota(&self) -> String {
+impl DotosEncode for BrightnessPercent {
+    fn to_dotos(&self) -> String {
         self.0.to_string()
     }
 }
 
-impl NotaDecode for BrightnessPercent {
-    fn from_nota_block(block: &Block) -> std::result::Result<Self, NotaDecodeError> {
-        let raw = NotaBlock::new(block).parse_u16()?;
+impl DotosDecode for BrightnessPercent {
+    fn from_dotos_block(block: &Block) -> std::result::Result<Self, DotosDecodeError> {
+        let raw = DotosBlock::new(block).parse_u16()?;
         Ok(Self::new(raw.min(u16::from(u8::MAX)) as u8))
     }
 }

@@ -1,12 +1,12 @@
 use chroma::{BrightnessLevel, BrightnessPercent};
-use nota::{NotaDecode, NotaEncode, NotaSource};
+use dotos::{DotosDecode, DotosEncode, DotosSource};
 
-fn round_trip_nota<T>(value: &T) -> T
+fn round_trip_dotos<T>(value: &T) -> T
 where
-    T: NotaEncode + NotaDecode + Clone,
+    T: DotosEncode + DotosDecode + Clone,
 {
-    let text = value.to_nota();
-    NotaSource::new(&text).parse().expect("decode")
+    let text = value.to_dotos();
+    DotosSource::new(&text).parse().expect("decode")
 }
 
 #[test]
@@ -159,7 +159,7 @@ fn levels_match_canonical_percent() {
 }
 
 #[test]
-fn nota_round_trips_every_level() {
+fn dotos_round_trips_every_level() {
     for level in [
         BrightnessLevel::Dim,
         BrightnessLevel::Dimmer,
@@ -168,12 +168,12 @@ fn nota_round_trips_every_level() {
         BrightnessLevel::Brighter,
         BrightnessLevel::Brightest,
     ] {
-        assert_eq!(round_trip_nota(&level), level);
+        assert_eq!(round_trip_dotos(&level), level);
     }
 }
 
 #[test]
-fn nota_encodes_as_pascal_variant_name() {
-    let text = BrightnessLevel::Brightest.to_nota();
+fn dotos_encodes_as_pascal_variant_name() {
+    let text = BrightnessLevel::Brightest.to_dotos();
     assert_eq!(text, "Brightest");
 }

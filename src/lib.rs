@@ -1,5 +1,5 @@
 //! chroma — one Rust daemon for theme, warmth, and brightness,
-//! controlled via NOTA.
+//! controlled via DOTOS.
 //!
 //! Per the design report at
 //! `~/primary/reports/system-specialist/28-chroma-unified-visual-daemon.md`:

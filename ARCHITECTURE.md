@@ -29,7 +29,7 @@ Chroma owns:
 - the persisted current value per axis (in redb + rkyv)
 - the typed CLI request grammar (`Request` / `Response`)
 - the IPC contract between CLI and daemon (rkyv-on-UDS)
-- the configuration and palette grammar (`Config`, NOTA on disk)
+- the configuration and palette grammar (`Config`, DOTOS on disk)
 - the bounded geoclue2 system-bus location read when twilight
   triggers are used
 - the orchestration of ramps (start, interrupt, replace)
@@ -42,7 +42,7 @@ Chroma does **not** own:
   daemon that talks to the wlroots compositor; chroma is its
   sole consumer
 - the colour palette's authorship — Ignis is the palette;
-  chroma reads it as NOTA data and applies it, but does not
+  chroma reads it as DOTOS data and applies it, but does not
   generate, edit, or version the palette
 - the geolocation source — geoclue2 is the upstream authority;
   chroma reads it directly on the system bus but does not bypass,
@@ -129,16 +129,16 @@ Daemon ↔ CLI is the **signal pattern** documented in
   `Error(Error)`)
 - Pairing: by position on the connection (FIFO)
 
-The CLI binary is a thin signal client: parse NOTA argv into a
+The CLI binary is a thin signal client: parse DOTOS argv into a
 typed request → archive with rkyv → length-prefix → send → read
-reply → bytecheck-validate → print as NOTA. Every mutating
+reply → bytecheck-validate → print as DOTOS. Every mutating
 request returns `Accepted` after the daemon accepts ownership
 of the change; theme scripts, instant gamma writes, and ramp
 setup/read work continue asynchronously.
 
 ## Configuration
 
-Single NOTA record at `~/.config/chroma/config.nota`. Re-parsed
+Single DOTOS record at `~/.config/chroma/config.dotos`. Re-parsed
 on inotify push. Parses into a typed `Config`:
 
 ```
@@ -193,7 +193,7 @@ do not rewrite theme files, reload applications, restart ramps, or repeat gamma
 writes when the projection is unchanged. Each schedule reconciliation increments
 a generation counter so stale delayed messages from before suspend or config
 reload cannot keep an old deadline chain alive.
-Data-format inputs at the Chroma boundary are NOTA; YAML and YML
+Data-format inputs at the Chroma boundary are DOTOS; YAML and YML
 inputs are rejected. `GhosttyConfigTemplates` paths are references
 to complete Ghostty-native config files produced by the host
 profile; Chroma does not parse them as palette data and does not
@@ -227,17 +227,17 @@ boot hard-fails on mismatch.
 | In-process: actor ↔ actor | typed Rust values |
 | Daemon ↔ CLI | rkyv-archived `Request` / `Response`, length-prefixed |
 | Daemon ↔ disk (state) | rkyv values inside redb tables |
-| Daemon ↔ disk (config + palettes) | NOTA text record (`Config`) |
+| Daemon ↔ disk (config + palettes) | DOTOS text record (`Config`) |
 | Daemon ↔ Ghostty config templates | read-only Ghostty-native text files, copied byte-for-byte |
 | Daemon ↔ mutable Ghostty config | `$XDG_CONFIG_HOME/ghostty/config.ghostty` |
 | Daemon ↔ running Pi sessions | Unix-stream line frame (`dark\n` or `light\n`) at the configured socket |
 | Daemon ↔ wl-gammarelay-rs | zbus property writes (`Temperature` u16, `Brightness` f64) |
 | Daemon ↔ geoclue2 | bounded zbus system-bus location read |
 | Daemon ↔ theme concerns | typed Rust values; no apply-command schema |
-| Daemon ↔ human (audit) | NOTA reply printed by the CLI |
+| Daemon ↔ human (audit) | DOTOS reply printed by the CLI |
 
 JSON / serde appears nowhere in the daemon. The only text
-format accepted as Chroma input is NOTA (config + CLI); all
+format accepted as Chroma input is DOTOS (config + CLI); all
 other daemon-owned bytes are rkyv archives.
 
 ## Forbidden Pattern: Global Live-Terminal Fanout

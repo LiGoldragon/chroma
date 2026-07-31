@@ -1,9 +1,9 @@
 //! [`Response`] — what the daemon sends back to the CLI.
 //!
 //! Travels on the wire as a length-prefixed rkyv archive; the
-//! CLI prints it as a single NOTA record.
+//! CLI prints it as a single DOTOS record.
 
-use nota::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode, NotaSource};
+use dotos::{Block, Delimiter, DotosBlock, DotosDecode, DotosDecodeError, DotosEncode, DotosSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::brightness::BrightnessPercent;
@@ -37,14 +37,14 @@ pub enum Response {
 }
 
 impl Response {
-    /// Render as NOTA for the CLI to print.
-    pub fn to_nota(&self) -> Result<String> {
-        Ok(NotaEncode::to_nota(self))
+    /// Render as DOTOS for the CLI to print.
+    pub fn to_dotos(&self) -> Result<String> {
+        Ok(DotosEncode::to_dotos(self))
     }
 
-    /// Parse from a NOTA record (used in tests).
-    pub fn from_nota(text: &str) -> Result<Self> {
-        Ok(NotaSource::new(text).parse()?)
+    /// Parse from a DOTOS record (used in tests).
+    pub fn from_dotos(text: &str) -> Result<Self> {
+        Ok(DotosSource::new(text).parse()?)
     }
 
     /// Archive into rkyv bytes for the wire.
@@ -59,12 +59,7 @@ impl Response {
         rkyv::from_bytes::<Self, rkyv::rancor::Error>(bytes).map_err(|err| Error::RkyvCodec(err.to_string()))
     }
 
-    fn decode_tagged(children: &[Block]) -> std::result::Result<Self, NotaDecodeError> {
-        let tag = children
-            .first()
-            .and_then(Block::demote_to_string)
-            .ok_or(NotaDecodeError::ExpectedAtom { type_name: "Response variant" })?;
-        let payload = &children[1..];
+    fn decode_tagged(tag: &str, payload: &[Block]) -> std::result::Result<Self, DotosDecodeError> {
         match tag {
             "Accepted" => {
                 Self::expect_payload_count("Accepted", payload, 0)?;
@@ -105,7 +100,7 @@ impl Response {
                 Self::expect_payload_count("Error", payload, 1)?;
                 Ok(Self::Error { message: Self::decode_payload(payload, 0)? })
             }
-            other => Err(NotaDecodeError::UnknownVariant { enum_name: "Response", variant: other.to_string() }),
+            other => Err(DotosDecodeError::UnknownVariant { enum_name: "Response", variant: other.to_string() }),
         }
     }
 
@@ -113,59 +108,61 @@ impl Response {
         type_name: &'static str,
         payload: &[Block],
         expected: usize,
-    ) -> std::result::Result<(), NotaDecodeError> {
+    ) -> std::result::Result<(), DotosDecodeError> {
         if payload.len() == expected {
             Ok(())
         } else {
-            Err(NotaDecodeError::ExpectedRootCount { type_name, expected, found: payload.len() })
+            Err(DotosDecodeError::ExpectedRootCount { type_name, expected, found: payload.len() })
         }
     }
 
-    fn decode_payload<Value: NotaDecode>(
+    fn decode_payload<Value: DotosDecode>(
         payload: &[Block],
         index: usize,
-    ) -> std::result::Result<Value, NotaDecodeError> {
-        Value::from_nota_block(&payload[index])
+    ) -> std::result::Result<Value, DotosDecodeError> {
+        Value::from_dotos_block(&payload[index])
     }
 
     fn tagged(tag: &'static str, payload: impl IntoIterator<Item = String>) -> String {
-        let mut fields = Vec::new();
-        fields.push(tag.to_owned());
-        fields.extend(payload);
-        Delimiter::Parenthesis.wrap(fields)
+        format!("{tag}.{}", Delimiter::Parenthesis.wrap(payload))
     }
 }
 
-impl NotaDecode for Response {
-    fn from_nota_block(block: &Block) -> std::result::Result<Self, NotaDecodeError> {
+impl DotosDecode for Response {
+    fn from_dotos_block(block: &Block) -> std::result::Result<Self, DotosDecodeError> {
         if let Some(tag) = block.demote_to_string() {
             return match tag {
                 "Accepted" => Ok(Self::Accepted),
                 "SolarClockUnavailable" => Ok(Self::SolarClockUnavailable),
-                other => Err(NotaDecodeError::UnknownVariant { enum_name: "Response", variant: other.to_string() }),
+                other => Err(DotosDecodeError::UnknownVariant { enum_name: "Response", variant: other.to_string() }),
             };
         }
-        let children = NotaBlock::new(block).expect_delimited(Delimiter::Parenthesis, "Response")?;
-        Self::decode_tagged(children)
+        let (head, payload) = block.as_application().ok_or(DotosDecodeError::ExpectedDelimited {
+            type_name: "Response",
+            delimiter: "Response.(payload) application",
+        })?;
+        let tag = head.demote_to_string().ok_or(DotosDecodeError::ExpectedAtom { type_name: "Response variant" })?;
+        let payload = DotosBlock::new(payload).expect_delimited(Delimiter::Parenthesis, "Response")?;
+        Self::decode_tagged(tag, payload)
     }
 }
 
-impl NotaEncode for Response {
-    fn to_nota(&self) -> String {
+impl DotosEncode for Response {
+    fn to_dotos(&self) -> String {
         match self {
             Self::Accepted => "Accepted".to_owned(),
-            Self::Theme { mode } => Self::tagged("Theme", [mode.to_nota()]),
-            Self::Warmth { kelvin } => Self::tagged("Warmth", [kelvin.to_nota()]),
-            Self::Brightness { percent } => Self::tagged("Brightness", [percent.to_nota()]),
+            Self::Theme { mode } => Self::tagged("Theme", [mode.to_dotos()]),
+            Self::Warmth { kelvin } => Self::tagged("Warmth", [kelvin.to_dotos()]),
+            Self::Brightness { percent } => Self::tagged("Brightness", [percent.to_dotos()]),
             Self::State { theme, kelvin, percent } => {
-                Self::tagged("State", [theme.to_nota(), kelvin.to_nota(), percent.to_nota()])
+                Self::tagged("State", [theme.to_dotos(), kelvin.to_dotos(), percent.to_dotos()])
             }
             Self::SolarClock { utc_offset_seconds, equation_of_time_valid_until_unix_seconds } => Self::tagged(
                 "SolarClock",
-                [utc_offset_seconds.to_nota(), equation_of_time_valid_until_unix_seconds.to_nota()],
+                [utc_offset_seconds.to_dotos(), equation_of_time_valid_until_unix_seconds.to_dotos()],
             ),
             Self::SolarClockUnavailable => "SolarClockUnavailable".to_owned(),
-            Self::Error { message } => Self::tagged("Error", [message.to_nota()]),
+            Self::Error { message } => Self::tagged("Error", [message.to_dotos()]),
         }
     }
 }

@@ -1,7 +1,7 @@
 # chroma
 
 One Rust daemon for the colour state of the desktop — theme,
-warmth, and brightness — controlled via NOTA.
+warmth, and brightness — controlled via DOTOS.
 
 `chroma` replaces darkman, the `nightshift` shell wrapper, the
 three `nightshift-*` systemd services, and the `brightness` shell
@@ -14,8 +14,8 @@ wrapper with a single user-service component:
   per-axis ramp durations).
 - **Persisted state** in redb + rkyv, crash-consistent across
   resume / login / wake.
-- **One CLI** that takes a single NOTA record on argv —
-  `chroma '(SetWarmth Warm)'` — and signals the daemon over a
+- **One CLI** that takes a single DOTOS record on argv —
+  `chroma 'SetWarmth.(Warm)'` — and signals the daemon over a
   Unix domain socket using length-prefixed rkyv frames.
 - **Native theme concerns** — Chroma owns terminal, desktop,
   Ghostty, and Emacs theme application as independent concern
@@ -25,7 +25,7 @@ wrapper with a single user-service component:
 
 The daemon is named for what it manages — *chroma*, the colour
 state of the display. It applies the existing **Ignis** colour
-scheme from NOTA palette data; Ignis is the palette, Chroma is
+scheme from DOTOS palette data; Ignis is the palette, Chroma is
 the agent that schedules and applies it.
 
 For the agent contract, see [`AGENTS.md`](AGENTS.md). For the

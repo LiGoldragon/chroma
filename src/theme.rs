@@ -11,10 +11,10 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration as StandardDuration;
 
+use dotos::{DotosDecode, DotosEncode};
 use kameo::actor::{Actor, ActorRef, Spawn, WeakActorRef};
 use kameo::error::{ActorStopReason, Infallible};
 use kameo::message::{Context, Message};
-use nota::{NotaDecode, NotaEncode};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher, recommended_watcher};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tokio::io::AsyncWriteExt;
@@ -26,7 +26,9 @@ use crate::error::{Error, Result};
 use crate::time::RampTrigger;
 
 /// The active colour scheme.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, NotaDecode, NotaEncode, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, DotosDecode, DotosEncode, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub enum ThemeMode {
     Dark,
     Light,
@@ -462,7 +464,7 @@ impl ThemePalette {
     }
 }
 
-/// Dark and light palettes read from NOTA config.
+/// Dark and light palettes read from DOTOS config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemePalettes {
     pub dark: ThemePalette,

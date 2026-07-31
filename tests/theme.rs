@@ -2,8 +2,8 @@ use chroma::{
     ApplyTheme, GhosttyConfigChange, GhosttyConfigFile, PiThemeControl, ThemeAdapters, ThemeApplier, ThemeAxis,
     ThemeConcern, ThemeMode, ThemePalette, ThemePalettes, ThemeSchedule,
 };
+use dotos::{DotosDecode, DotosEncode, DotosSource};
 use kameo::actor::ActorRef;
-use nota::{NotaDecode, NotaEncode, NotaSource};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -11,12 +11,12 @@ use tokio::io::AsyncReadExt;
 use tokio::net::UnixListener;
 use tokio::time::{Duration, timeout};
 
-fn round_trip_nota<T>(value: &T) -> T
+fn round_trip_dotos<T>(value: &T) -> T
 where
-    T: NotaEncode + NotaDecode + Clone,
+    T: DotosEncode + DotosDecode + Clone,
 {
-    let text = value.to_nota();
-    NotaSource::new(&text).parse().expect("decode")
+    let text = value.to_dotos();
+    DotosSource::new(&text).parse().expect("decode")
 }
 
 struct ThemeApplierFixture {
@@ -94,21 +94,21 @@ fn toggled_twice_is_identity() {
 }
 
 #[test]
-fn nota_round_trip_dark() {
-    assert_eq!(round_trip_nota(&ThemeMode::Dark), ThemeMode::Dark);
+fn dotos_round_trip_dark() {
+    assert_eq!(round_trip_dotos(&ThemeMode::Dark), ThemeMode::Dark);
 }
 
 #[test]
-fn nota_round_trip_light() {
-    assert_eq!(round_trip_nota(&ThemeMode::Light), ThemeMode::Light);
+fn dotos_round_trip_light() {
+    assert_eq!(round_trip_dotos(&ThemeMode::Light), ThemeMode::Light);
 }
 
 #[test]
-fn nota_encodes_as_pascal_variant_name() {
-    let text = ThemeMode::Dark.to_nota();
+fn dotos_encodes_as_pascal_variant_name() {
+    let text = ThemeMode::Dark.to_dotos();
     assert_eq!(text, "Dark");
 
-    let text = ThemeMode::Light.to_nota();
+    let text = ThemeMode::Light.to_dotos();
     assert_eq!(text, "Light");
 }
 

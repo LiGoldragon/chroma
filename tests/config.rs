@@ -16,14 +16,14 @@ impl Fixture {
     }
 
     fn write_config(&self, text: &str) -> PathBuf {
-        let config = self.temporary_directory.path().join("config.nota");
+        let config = self.temporary_directory.path().join("config.dotos");
         fs::write(&config, text).expect("write config");
         config
     }
 }
 
 #[test]
-fn config_file_extracts_native_theme_axis_from_nota_config() {
+fn config_file_extracts_native_theme_axis_from_dotos_config() {
     let fixture = Fixture::new();
     let config = fixture.write_config(NATIVE_CONFIG);
 
@@ -55,7 +55,7 @@ fn config_file_extracts_native_theme_axis_from_nota_config() {
 }
 
 #[test]
-fn config_file_decodes_manual_theme_schedule_from_nota_config() {
+fn config_file_decodes_manual_theme_schedule_from_dotos_config() {
     let fixture = Fixture::new();
     let config = fixture.write_config(&NATIVE_CONFIG.replace(
         "(Schedule
@@ -117,7 +117,7 @@ fn config_file_decodes_sunrise_sunset_and_relative_solar_offsets() {
 }
 
 #[test]
-fn config_file_extracts_full_visual_config_from_nota_config() {
+fn config_file_extracts_full_visual_config_from_dotos_config() {
     let fixture = Fixture::new();
     let config = fixture.write_config(NATIVE_CONFIG);
 
@@ -143,7 +143,7 @@ fn config_paths_with_apostrophes_do_not_require_quote_delimiters() {
 }
 
 #[test]
-fn config_file_decodes_scheduled_warmth_from_nota_config() {
+fn config_file_decodes_scheduled_warmth_from_dotos_config() {
     let fixture = Fixture::new();
     let config = fixture.write_config(&NATIVE_CONFIG.replace(
         "(Warmth (Schedule (Manual Neutral)))",
@@ -201,7 +201,7 @@ fn hc_chroma_003_legacy_theme_concern_is_rejected_not_retained() {
 }
 
 #[test]
-fn hc_chroma_004_yaml_data_inputs_are_rejected_in_favor_of_nota() {
+fn hc_chroma_004_yaml_data_inputs_are_rejected_in_favor_of_dotos() {
     let fixture = Fixture::new();
     let config = fixture.write_config(&NATIVE_CONFIG.replace("(FontPointSize 14)", "(PaletteFile ignis.yaml)"));
 

@@ -1,6 +1,6 @@
 //! [`Config`] — top-level chroma configuration.
 //!
-//! Chroma's configuration input is NOTA only. Removed theme apply
+//! Chroma's configuration input is DOTOS only. Removed theme apply
 //! command records are rejected instead of migrated or interpreted.
 
 use core::fmt;
@@ -15,7 +15,7 @@ use crate::theme::{
 };
 use crate::time::{LocalHour, LocalMinute, RampDuration, RampTrigger, RelativeSolarOffset, SignedMinutes};
 use crate::warmth::{WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint};
-use nota::{Block, Delimiter, Document, NotaBlock};
+use dotos::{Block, Delimiter, Document, DotosBlock};
 
 /// The on-disk Chroma configuration file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,18 +35,18 @@ impl ConfigFile {
             return Ok(Self { path });
         }
         if let Some(path) =
-            std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).map(|path| path.join("chroma/config.nota"))
+            std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).map(|path| path.join("chroma/config.dotos"))
         {
             return Ok(Self { path });
         }
-        if let Some(path) = std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config/chroma/config.nota"))
+        if let Some(path) = std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config/chroma/config.dotos"))
         {
             return Ok(Self { path });
         }
-        Err(Error::Config { message: "neither CHROMA_CONFIG, XDG_CONFIG_HOME, nor HOME locates config.nota".into() })
+        Err(Error::Config { message: "neither CHROMA_CONFIG, XDG_CONFIG_HOME, nor HOME locates config.dotos".into() })
     }
 
-    /// Extract the theme axis from the NOTA config.
+    /// Extract the theme axis from the DOTOS config.
     pub fn theme_axis(&self) -> Result<ThemeAxis> {
         Self::decode_theme_axis(&std::fs::read_to_string(&self.path)?)
     }
@@ -90,7 +90,7 @@ impl<'input> ConfigText<'input> {
 
     fn config(&self) -> Result<Config> {
         let document = ConfigDocument::parse(self.text)?;
-        document.reject_removed_or_non_nota_inputs()?;
+        document.reject_removed_or_non_dotos_inputs()?;
         document.config()
     }
 }
@@ -175,8 +175,8 @@ impl ConfigNode {
         if let Some(children) = block.as_delimited(Delimiter::Parenthesis) {
             return Self::from_parenthesis(children);
         }
-        if block.is_square_bracket() || block.is_pipe_text() {
-            return Ok(Self::Str(NotaBlock::new(block).parse_string()?));
+        if block.is_square_bracket() || block.is_pipe_text() || block.as_application().is_some() {
+            return Ok(Self::Str(DotosBlock::new(block).parse_string()?));
         }
         if let Some(value) = block.demote_to_string() {
             if let Ok(integer) = value.parse::<i128>() {
@@ -196,12 +196,12 @@ impl ConfigNode {
         Ok(Self::Record { head, body })
     }
 
-    fn reject_removed_or_non_nota_inputs(&self) -> Result<()> {
+    fn reject_removed_or_non_dotos_inputs(&self) -> Result<()> {
         match self {
             Self::Record { head, body } => {
                 Self::reject_value(head)?;
                 for node in body {
-                    node.reject_removed_or_non_nota_inputs()?;
+                    node.reject_removed_or_non_dotos_inputs()?;
                 }
                 Ok(())
             }
@@ -216,7 +216,7 @@ impl ConfigNode {
         }
         let lower = value.to_ascii_lowercase();
         if lower.contains(".yaml") || lower.contains(".yml") {
-            return Err(Error::Config { message: "YAML inputs are forbidden; use NOTA".into() });
+            return Err(Error::Config { message: "YAML inputs are forbidden; use DOTOS".into() });
         }
         Ok(())
     }
@@ -256,14 +256,14 @@ struct ConfigDocument {
 
 impl ConfigDocument {
     fn parse(text: &str) -> Result<Self> {
-        let document = Document::parse(text).map_err(nota::NotaDecodeError::from)?;
+        let document = Document::parse(text).map_err(dotos::DotosDecodeError::from)?;
         let roots = document.root_objects().iter().map(ConfigNode::from_block).collect::<Result<Vec<_>>>()?;
         Ok(Self { roots })
     }
 
-    fn reject_removed_or_non_nota_inputs(&self) -> Result<()> {
+    fn reject_removed_or_non_dotos_inputs(&self) -> Result<()> {
         for root in &self.roots {
-            root.reject_removed_or_non_nota_inputs()?;
+            root.reject_removed_or_non_dotos_inputs()?;
         }
         Ok(())
     }

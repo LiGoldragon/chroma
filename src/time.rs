@@ -10,13 +10,13 @@ use core::fmt;
 use core::time::Duration;
 
 use crate::error::{Error, Result};
-use nota::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode};
+use dotos::{Block, Delimiter, DotosBlock, DotosDecode, DotosDecodeError, DotosEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 /// A positive duration over which a ramped axis interpolates.
 ///
 /// Stored as whole seconds (`u64`) so it round-trips cleanly
-/// through both rkyv (the wire) and NOTA (the CLI argv).
+/// through both rkyv (the wire) and DOTOS (the CLI argv).
 /// Construction clamps to ≥ 1 second so the lerp denominator
 /// is never zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, RkyvSerialize, RkyvDeserialize)]
@@ -61,43 +61,46 @@ impl fmt::Display for RampDuration {
     }
 }
 
-// NOTA wire form: `(Minutes <n>)` or `(Seconds <n>)`. Encoded
+// DOTOS wire form: `Minutes.(<n>)` or `Seconds.(<n>)`. Encoded
 // in whichever form fits cleanly: if the duration is a whole
-// number of minutes, emit `(Minutes <n>)`; otherwise emit
-// `(Seconds <n>)`. Decode accepts either.
-impl NotaEncode for RampDuration {
-    fn to_nota(&self) -> String {
+// number of minutes, emit `Minutes.(<n>)`; otherwise emit
+// `Seconds.(<n>)`. Decode accepts either.
+impl DotosEncode for RampDuration {
+    fn to_dotos(&self) -> String {
         if self.0.is_multiple_of(60) {
-            Delimiter::Parenthesis.wrap(["Minutes".to_owned(), (self.0 / 60).to_string()])
+            format!("Minutes.{}", Delimiter::Parenthesis.wrap([(self.0 / 60).to_string()]))
         } else {
-            Delimiter::Parenthesis.wrap(["Seconds".to_owned(), self.0.to_string()])
+            format!("Seconds.{}", Delimiter::Parenthesis.wrap([self.0.to_string()]))
         }
     }
 }
 
-impl NotaDecode for RampDuration {
-    fn from_nota_block(block: &Block) -> std::result::Result<Self, NotaDecodeError> {
-        let children = NotaBlock::new(block).expect_delimited(Delimiter::Parenthesis, "RampDuration")?;
-        if children.len() != 2 {
-            return Err(NotaDecodeError::ExpectedRootCount {
+impl DotosDecode for RampDuration {
+    fn from_dotos_block(block: &Block) -> std::result::Result<Self, DotosDecodeError> {
+        let (head, payload) = block.as_application().ok_or(DotosDecodeError::ExpectedDelimited {
+            type_name: "RampDuration",
+            delimiter: "RampDuration.(payload) application",
+        })?;
+        let children = DotosBlock::new(payload).expect_delimited(Delimiter::Parenthesis, "RampDuration")?;
+        if children.len() != 1 {
+            return Err(DotosDecodeError::ExpectedRootCount {
                 type_name: "RampDuration",
-                expected: 2,
+                expected: 1,
                 found: children.len(),
             });
         }
-        let head = children[0]
-            .demote_to_string()
-            .ok_or(NotaDecodeError::ExpectedAtom { type_name: "RampDuration variant" })?;
+        let head =
+            head.demote_to_string().ok_or(DotosDecodeError::ExpectedAtom { type_name: "RampDuration variant" })?;
         match head {
             "Minutes" => {
-                let minutes = NotaBlock::new(&children[1]).parse_integer()?;
+                let minutes = DotosBlock::new(&children[0]).parse_integer()?;
                 Ok(Self::from_seconds(minutes.saturating_mul(60)))
             }
             "Seconds" => {
-                let seconds = NotaBlock::new(&children[1]).parse_integer()?;
+                let seconds = DotosBlock::new(&children[0]).parse_integer()?;
                 Ok(Self::from_seconds(seconds))
             }
-            other => Err(NotaDecodeError::UnknownVariant { enum_name: "RampDuration", variant: other.to_string() }),
+            other => Err(DotosDecodeError::UnknownVariant { enum_name: "RampDuration", variant: other.to_string() }),
         }
     }
 }
@@ -169,7 +172,7 @@ pub enum RelativeSolarOffset {
 }
 
 impl RelativeSolarOffset {
-    /// Decode the NOTA label used in the Chroma config.
+    /// Decode the DOTOS label used in the Chroma config.
     pub fn from_config_name(name: &str) -> Result<Self> {
         match name {
             "ExtremelyEarly" => Ok(Self::ExtremelyEarly),

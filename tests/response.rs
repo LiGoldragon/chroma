@@ -3,12 +3,12 @@
 use chroma::Response;
 
 #[test]
-fn accepted_response_uses_human_readable_nota_word() {
+fn accepted_response_uses_human_readable_dotos_word() {
     let response = Response::Accepted;
 
-    let rendered = response.to_nota().expect("nota encode");
+    let rendered = response.to_dotos().expect("dotos encode");
     assert_eq!(rendered, "Accepted");
-    assert_eq!(Response::from_nota(&rendered).expect("nota decode"), response);
+    assert_eq!(Response::from_dotos(&rendered).expect("dotos decode"), response);
 }
 
 #[test]
@@ -23,25 +23,25 @@ fn accepted_response_round_trips_through_rkyv_wire_format() {
 fn solar_clock_response_preserves_positional_wire_while_naming_equation_validity() {
     let response =
         Response::SolarClock { utc_offset_seconds: -854, equation_of_time_valid_until_unix_seconds: 1_736_208_000 };
-    let rendered = response.to_nota().expect("nota encode");
+    let rendered = response.to_dotos().expect("dotos encode");
 
-    assert_eq!(rendered, "(SolarClock -854 1736208000)");
-    assert_eq!(Response::from_nota(&rendered).expect("nota decode"), response);
+    assert_eq!(rendered, "SolarClock.(-854 1736208000)");
+    assert_eq!(Response::from_dotos(&rendered).expect("dotos decode"), response);
     assert_eq!(Response::from_archive(&response.archive().expect("archive")).expect("decode"), response);
 }
 
 #[test]
 fn unavailable_solar_clock_round_trips_explicitly() {
     let response = Response::SolarClockUnavailable;
-    assert_eq!(response.to_nota().expect("nota encode"), "SolarClockUnavailable");
-    assert_eq!(Response::from_nota("SolarClockUnavailable").expect("nota decode"), response);
+    assert_eq!(response.to_dotos().expect("dotos encode"), "SolarClockUnavailable");
+    assert_eq!(Response::from_dotos("SolarClockUnavailable").expect("dotos decode"), response);
 }
 
 #[test]
 fn error_messages_with_apostrophes_do_not_require_quote_delimiters() {
     let response = Response::Error { message: "theme's palette is missing".into() };
 
-    let rendered = response.to_nota().expect("nota encode");
-    assert_eq!(rendered, "(Error [theme's palette is missing])");
-    assert_eq!(Response::from_nota(&rendered).expect("nota decode"), response);
+    let rendered = response.to_dotos().expect("dotos encode");
+    assert_eq!(rendered, "Error.((theme's palette is missing))");
+    assert_eq!(Response::from_dotos(&rendered).expect("dotos decode"), response);
 }

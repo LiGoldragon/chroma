@@ -12,7 +12,7 @@
 
 use core::fmt;
 
-use nota::{Block, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode};
+use dotos::{Block, DotosBlock, DotosDecode, DotosDecodeError, DotosEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::error::{Error, Result};
@@ -20,7 +20,7 @@ use crate::time::{RampDuration, RampTrigger};
 
 /// A discrete warmth level on the daemon's standard ladder.
 #[derive(
-    Debug, Default, Clone, Copy, PartialEq, Eq, Hash, NotaDecode, NotaEncode, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug, Default, Clone, Copy, PartialEq, Eq, Hash, DotosDecode, DotosEncode, Archive, RkyvSerialize, RkyvDeserialize,
 )]
 pub enum WarmthLevel {
     Cold,
@@ -91,7 +91,7 @@ impl fmt::Display for WarmthLevel {
 /// A colour-temperature value in kelvins.
 ///
 /// The wire form for wl-gammarelay-rs's `Temperature` (q) DBus
-/// property. All construction paths — including [`NotaDecode`]
+/// property. All construction paths — including [`DotosDecode`]
 /// — clamp to the daemon's accepted range `[MIN, MAX]` =
 /// `[1000, 10000]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, RkyvSerialize, RkyvDeserialize)]
@@ -150,18 +150,18 @@ impl fmt::Display for KelvinTemperature {
     }
 }
 
-// Hand-written NOTA codec — routes decode through `new` so
+// Hand-written DOTOS codec — routes decode through `new` so
 // out-of-range values clamp consistently. A transparent derive would
 // bypass the clamp.
-impl NotaEncode for KelvinTemperature {
-    fn to_nota(&self) -> String {
+impl DotosEncode for KelvinTemperature {
+    fn to_dotos(&self) -> String {
         self.0.to_string()
     }
 }
 
-impl NotaDecode for KelvinTemperature {
-    fn from_nota_block(block: &Block) -> std::result::Result<Self, NotaDecodeError> {
-        Ok(Self::new(NotaBlock::new(block).parse_u16()?))
+impl DotosDecode for KelvinTemperature {
+    fn from_dotos_block(block: &Block) -> std::result::Result<Self, DotosDecodeError> {
+        Ok(Self::new(DotosBlock::new(block).parse_u16()?))
     }
 }
 

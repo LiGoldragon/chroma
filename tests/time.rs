@@ -1,13 +1,13 @@
 use chroma::{LocalHour, LocalMinute, RampDuration, RampTrigger, RelativeSolarOffset, SignedMinutes};
 use core::time::Duration;
-use nota::{NotaDecode, NotaEncode, NotaSource};
+use dotos::{DotosDecode, DotosEncode, DotosSource};
 
-fn round_trip_nota<T>(value: &T) -> T
+fn round_trip_dotos<T>(value: &T) -> T
 where
-    T: NotaEncode + NotaDecode,
+    T: DotosEncode + DotosDecode,
 {
-    let text = value.to_nota();
-    NotaSource::new(&text).parse().expect("decode")
+    let text = value.to_dotos();
+    DotosSource::new(&text).parse().expect("decode")
 }
 
 #[test]
@@ -148,23 +148,23 @@ fn ramp_trigger_display() {
 #[test]
 fn ramp_duration_round_trips_minute_aligned_as_minutes() {
     let one_hour = RampDuration::from_minutes(60);
-    assert_eq!(one_hour.to_nota(), "(Minutes 60)");
-    assert_eq!(round_trip_nota(&one_hour), one_hour);
+    assert_eq!(one_hour.to_dotos(), "Minutes.(60)");
+    assert_eq!(round_trip_dotos(&one_hour), one_hour);
 }
 
 #[test]
 fn ramp_duration_round_trips_seconds_when_not_minute_aligned() {
     let thirty_seconds = RampDuration::from_seconds(30);
-    assert_eq!(thirty_seconds.to_nota(), "(Seconds 30)");
-    assert_eq!(round_trip_nota(&thirty_seconds), thirty_seconds);
+    assert_eq!(thirty_seconds.to_dotos(), "Seconds.(30)");
+    assert_eq!(round_trip_dotos(&thirty_seconds), thirty_seconds);
 }
 
 #[test]
 fn ramp_duration_decodes_either_form() {
-    let from_minutes: RampDuration = NotaSource::new("(Minutes 5)").parse().expect("decode minutes");
+    let from_minutes: RampDuration = DotosSource::new("Minutes.(5)").parse().expect("decode minutes");
     assert_eq!(from_minutes.as_seconds(), 300);
 
-    let from_seconds: RampDuration = NotaSource::new("(Seconds 300)").parse().expect("decode seconds");
+    let from_seconds: RampDuration = DotosSource::new("Seconds.(300)").parse().expect("decode seconds");
     assert_eq!(from_seconds.as_seconds(), 300);
 
     assert_eq!(from_minutes, from_seconds);

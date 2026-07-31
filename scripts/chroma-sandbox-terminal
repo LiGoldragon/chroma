@@ -109,7 +109,7 @@ if [[ -z "${CHROMA_SANDBOX_PREPARED:-}" ]]; then
   export XDG_CONFIG_HOME="$sandbox_home/.config"
   export XDG_STATE_HOME="$sandbox_home/.local/state"
   export XDG_RUNTIME_DIR="$sandbox_runtime"
-  export CHROMA_CONFIG="$XDG_CONFIG_HOME/chroma/config.nota"
+  export CHROMA_CONFIG="$XDG_CONFIG_HOME/chroma/config.dotos"
   export CHROMA_SOCKET="$XDG_RUNTIME_DIR/chroma.sock"
   export CHROMA_SANDBOX_PREPARED=1
   export CHROMA_SANDBOX_LAUNCH_TERMINAL="$launch_terminal"
@@ -175,7 +175,7 @@ palette = 14=#9930cc
 palette = 15=#1a1510
 GHOSTTY_LIGHT
 
-  cat > "$CHROMA_CONFIG" <<NOTA
+  cat > "$CHROMA_CONFIG" <<DOTOS
 (Config
   (Theme
     (Concerns Terminal Ghostty)
@@ -222,7 +222,7 @@ GHOSTTY_LIGHT
     (Schedule (Manual Light)))
   (Warmth (Schedule (Manual Neutral)))
   (Brightness (Schedule (Manual Bright))))
-NOTA
+DOTOS
 
   dbus_socket_dir="$(mktemp -d "${TMPDIR:-/tmp}/chroma-dbus.XXXXXXXXXX")"
   export CHROMA_SANDBOX_DBUS_SOCKET_DIR="$dbus_socket_dir"
@@ -357,26 +357,26 @@ chroma-daemon > "$artifact_root/chroma-daemon.log" 2>&1 &
 daemon_pid="$!"
 await_socket "$CHROMA_SOCKET"
 
-chroma 'GetState' > "$artifact_root/get-state-before.nota"
+chroma 'GetState' > "$artifact_root/get-state-before.dotos"
 
-chroma '(SetTheme Light)' > "$artifact_root/set-theme-light.nota"
+chroma 'SetTheme.(Light)' > "$artifact_root/set-theme-light.dotos"
 await_ghostty_background "#faf5f0"
 await_ghostty_reload_count 1
 cp "$XDG_CONFIG_HOME/ghostty/config.ghostty" "$artifact_root/ghostty-light.config"
 
-chroma '(SetTheme Light)' > "$artifact_root/set-theme-light-unchanged.nota"
-chroma '(SetTheme Dark)' > "$artifact_root/set-theme-dark.nota"
+chroma 'SetTheme.(Light)' > "$artifact_root/set-theme-light-unchanged.dotos"
+chroma 'SetTheme.(Dark)' > "$artifact_root/set-theme-dark.dotos"
 await_ghostty_background "#000000"
 await_ghostty_reload_count 2
 cp "$XDG_CONFIG_HOME/ghostty/config.ghostty" "$artifact_root/ghostty-dark.config"
 
 case "${CHROMA_SANDBOX_VISIBLE_THEME:-Dark}" in
   Light)
-    chroma '(SetTheme Light)' > "$artifact_root/set-visible-theme.nota"
+    chroma 'SetTheme.(Light)' > "$artifact_root/set-visible-theme.dotos"
     await_ghostty_background "#faf5f0"
     ;;
   Dark)
-    chroma '(SetTheme Dark)' > "$artifact_root/set-visible-theme.nota"
+    chroma 'SetTheme.(Dark)' > "$artifact_root/set-visible-theme.dotos"
     await_ghostty_background "#000000"
     ;;
   *)
@@ -384,9 +384,9 @@ case "${CHROMA_SANDBOX_VISIBLE_THEME:-Dark}" in
     ;;
 esac
 
-rg -q '^Accepted$' "$artifact_root/set-theme-light.nota"
-rg -q '^Accepted$' "$artifact_root/set-theme-light-unchanged.nota"
-rg -q '^Accepted$' "$artifact_root/set-theme-dark.nota"
+rg -q '^Accepted$' "$artifact_root/set-theme-light.dotos"
+rg -q '^Accepted$' "$artifact_root/set-theme-light-unchanged.dotos"
+rg -q '^Accepted$' "$artifact_root/set-theme-dark.dotos"
 rg -q '^Activate reload-config$' "$artifact_root/fake-ghostty.calls"
 [[ -s "$XDG_STATE_HOME/chroma/state.redb" ]] || fail "state.redb was not written"
 

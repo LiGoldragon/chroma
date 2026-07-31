@@ -5,7 +5,7 @@ edition      = "2024"
 rust-version = "1.88"
 license-file = "LICENSE.md"
 repository   = "https://github.com/LiGoldragon/chroma"
-description  = "Chroma — one Rust daemon for theme, warmth, and brightness, controlled via NOTA."
+description  = "Chroma — one Rust daemon for theme, warmth, and brightness, controlled via DOTOS."
 
 [lib]
 path = "src/lib.rs"
@@ -22,7 +22,7 @@ path = "src/bin/chroma_daemon.rs"
 chrono       = { version = "0.4", default-features = false, features = ["clock"] }
 futures-util = "0.3"
 kameo        = { git = "https://github.com/LiGoldragon/kameo.git", branch = "main", default-features = false, features = ["macros", "tracing"] }
-nota    = { git = "https://github.com/LiGoldragon/nota.git", branch = "main" }
+dotos    = { git = "https://github.com/LiGoldragon/dotos.git", rev = "80c7b17f7ad3cf547d2624c6a243e5de5f85c9f3" }
 notify       = "5.2"
 redb         = "2.6.3"
 rkyv         = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
