@@ -99,3 +99,9 @@ prompts (always `-m '<msg>'`).
 - `HARD-CONSTRAINTS.md` — architecture locks and matching tests.
 - the `signal` repository — canonical signal pattern reference.
 - the `lojix` repository — typed DOTOS client shape.
+
+## Protos estate status
+
+Stack: correct-new destination
+Status: active component, current checkout legacy-wired
+This checkout is not proof of correct-new adoption.
