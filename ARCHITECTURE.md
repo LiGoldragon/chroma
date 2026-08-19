@@ -206,14 +206,19 @@ write back to those source paths.
 | Table | Key | Value |
 |---|---|---|
 | `theme` | fixed slot `current` | rkyv archive of `ThemeMode` |
-| `warmth` | fixed slot `current` | rkyv archive of `WarmthState` (level + custom kelvin override) |
+| `warmth-state` | fixed slot `current` | rkyv archive of `StoredWarmthState` (desired target, last relay-confirmed temperature, wall-clock projection, transition state) |
 | `brightness` | fixed slot `current` | rkyv archive of `BrightnessState` |
 | `location` | fixed slot `last_known` | rkyv archive of `(Latitude, Longitude)` |
 | `meta` | fixed slot `version` | `(schema_version, wire_version)` |
 
-Every transition is one redb write transaction. Redb-write
-happens **before** the hardware write so a crash mid-apply
-leaves redb in the new state and the next boot reapplies. The
+Every transition intent is one redb write transaction. Redb-write
+happens **before** the hardware write so a crash mid-apply retains the
+desired target without claiming that it reached hardware. Relay-confirmed
+writes separately advance the applied value. A persisted active transition
+is reconciled from the current wall-clock projection before it writes to the
+relay after restart. An absent `warmth-state` record leaves warmth unknown;
+the obsolete single-value `warmth` table is intentionally ignored rather
+than interpreted as a current physical state. The
 schedule engine also persists last-known geolocation after a
 successful geoclue refresh so daemon startup can perform immediate
 civil-trigger reconciliation from the last known position while a

@@ -34,8 +34,8 @@ use crate::response::Response;
 use crate::schedule::{Location, SchedulePlan, ScheduledBrightness, ScheduledValues, ScheduledWarmth};
 use crate::solar_time::SolarClockProjection;
 use crate::state::{
-    ReadStoredLocation, ReadStoredState, RecordBrightness, RecordLocation, RecordTheme, RecordWarmth, StateStore,
-    StoredVisualState,
+    ReadStoredLocation, ReadStoredState, RecordAppliedWarmth, RecordBrightness, RecordLocation, RecordTheme,
+    RecordWarmth, StateStore, StoredVisualState, StoredWarmthState,
 };
 use crate::theme::{ApplyTheme, ThemeApplier, ThemeMode};
 use crate::time::RampDuration;
@@ -116,7 +116,8 @@ async fn serve_connection(mut stream: UnixStream, root: &ActorRef<ChromaRoot>) -
 
 struct ChromaRoot {
     theme: ThemeMode,
-    warmth: KelvinTemperature,
+    warmth: Option<StoredWarmthState>,
+    warmth_fallback: KelvinTemperature,
     brightness: BrightnessPercent,
     state_store: ActorRef<StateStore>,
     theme_applier: ActorRef<ThemeApplier>,
@@ -132,7 +133,7 @@ impl ChromaRoot {
 
         let fallback = StoredVisualState {
             theme: config.theme.schedule.default_mode(),
-            kelvin: config.warmth.schedule.default_level().kelvin(),
+            warmth: None,
             percent: config.brightness.schedule.default_level().percent(),
         };
         let stored = state_store
@@ -145,11 +146,12 @@ impl ChromaRoot {
             .map_err(|error| Error::ActorCall { message: error.to_string() })?;
 
         let theme_applier = ThemeApplier::start(config.theme.clone()).await;
-        let warmth_applier = WarmthApplier::start(GammaClient::connect().await?).await;
+        let warmth_applier = WarmthApplier::start(GammaClient::connect().await?, state_store.clone()).await;
         let brightness_applier = BrightnessApplier::start(GammaClient::connect().await?).await;
         let reference = Self::spawn(Self {
             theme: stored.theme,
-            warmth: stored.kelvin,
+            warmth: stored.warmth,
+            warmth_fallback: config.warmth.schedule.default_level().kelvin(),
             brightness: stored.percent,
             state_store: state_store.clone(),
             theme_applier,
@@ -174,9 +176,9 @@ impl ChromaRoot {
             .map_err(|error| Error::ActorCall { message: error.to_string() })
     }
 
-    async fn persist_warmth(&self, kelvin: KelvinTemperature) -> Result<()> {
+    async fn persist_warmth(&self, state: StoredWarmthState) -> Result<()> {
         self.state_store
-            .ask(RecordWarmth { kelvin })
+            .ask(RecordWarmth { state })
             .await
             .map_err(|error| Error::ActorCall { message: error.to_string() })
     }
@@ -211,15 +213,17 @@ impl ChromaRoot {
     }
 
     async fn instant_warmth(&mut self, kelvin: KelvinTemperature) -> Result<Response> {
-        self.warmth = kelvin;
-        self.persist_warmth(kelvin).await?;
+        let state = self.warmth.unwrap_or_else(|| StoredWarmthState::requested_set(kelvin)).request_set(kelvin);
+        self.persist_warmth(state).await?;
+        self.warmth = Some(state);
         self.enqueue_warmth(WarmthApplication::Set { kelvin }).await?;
         Ok(Response::Accepted)
     }
 
     async fn ramp_warmth(&mut self, target: KelvinTemperature, duration: RampDuration) -> Result<Response> {
-        self.warmth = target;
-        self.persist_warmth(target).await?;
+        let state = self.warmth.unwrap_or_else(|| StoredWarmthState::requested_set(target)).request_ramp(target);
+        self.persist_warmth(state).await?;
+        self.warmth = Some(state);
         self.enqueue_warmth(WarmthApplication::Ramp { target, duration }).await?;
         Ok(Response::Accepted)
     }
@@ -230,8 +234,12 @@ impl ChromaRoot {
         target: KelvinTemperature,
         remaining_duration: RampDuration,
     ) -> Result<()> {
-        self.warmth = target;
-        self.persist_warmth(target).await?;
+        let state = match self.warmth {
+            Some(warmth) => warmth.project_transition(current, target),
+            None => StoredWarmthState::projected_transition(current, target),
+        };
+        self.persist_warmth(state).await?;
+        self.warmth = Some(state);
         self.enqueue_warmth(WarmthApplication::RampFrom { current, target, duration: remaining_duration }).await
     }
 
@@ -267,7 +275,9 @@ impl ChromaRoot {
 
             Request::SetWarmth { level } => self.instant_warmth(level.kelvin()).await,
             Request::SetWarmthKelvin { kelvin } => self.instant_warmth(kelvin).await,
-            Request::GetWarmth => Ok(Response::Warmth { kelvin: self.warmth }),
+            Request::GetWarmth => Ok(Response::Warmth {
+                kelvin: self.warmth.map(StoredWarmthState::desired_kelvin).unwrap_or(self.warmth_fallback),
+            }),
             Request::StartWarmthRamp { target, duration } => self.ramp_warmth(target.kelvin(), duration).await,
             Request::StartWarmthRampKelvin { target, duration } => self.ramp_warmth(target, duration).await,
             Request::InterruptWarmth => {
@@ -285,9 +295,11 @@ impl ChromaRoot {
                 Ok(Response::Accepted)
             }
 
-            Request::GetState => {
-                Ok(Response::State { theme: self.theme, kelvin: self.warmth, percent: self.brightness })
-            }
+            Request::GetState => Ok(Response::State {
+                theme: self.theme,
+                kelvin: self.warmth.map(StoredWarmthState::desired_kelvin).unwrap_or(self.warmth_fallback),
+                percent: self.brightness,
+            }),
             Request::GetSolarClock => self.solar_clock().await,
         }
     }
@@ -317,12 +329,22 @@ impl ChromaRoot {
             self.set_theme(theme).await?;
         }
         if let Some(warmth) = values.warmth {
+            self.warmth = self
+                .state_store
+                .ask(ReadStoredState {
+                    fallback: StoredVisualState { theme: self.theme, warmth: self.warmth, percent: self.brightness },
+                })
+                .await
+                .map_err(|error| Error::ActorCall { message: error.to_string() })?
+                .warmth;
             match warmth {
-                ScheduledWarmth::Settled { kelvin } if kelvin != self.warmth => {
+                ScheduledWarmth::Settled { kelvin }
+                    if self.warmth.is_none_or(|state| state.requires_settle_at(kelvin)) =>
+                {
                     self.instant_warmth(kelvin).await?;
                 }
                 ScheduledWarmth::Transition { current_kelvin, target_kelvin, remaining_duration }
-                    if target_kelvin != self.warmth =>
+                    if self.warmth.is_none_or(|state| state.requires_transition_to(target_kelvin)) =>
                 {
                     self.schedule_warmth_transition(current_kelvin, target_kelvin, remaining_duration).await?;
                 }
@@ -390,7 +412,11 @@ impl Message<ReapplyCurrentState> for ChromaRoot {
         _context: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.enqueue_theme(self.theme).await?;
-        self.enqueue_warmth(WarmthApplication::Set { kelvin: self.warmth }).await?;
+        if let Some(warmth) = self.warmth
+            && !warmth.is_transitioning()
+        {
+            self.enqueue_warmth(WarmthApplication::Set { kelvin: warmth.desired_kelvin() }).await?;
+        }
         self.enqueue_brightness(BrightnessApplication::Set { percent: self.brightness }).await?;
         Ok(())
     }
@@ -669,12 +695,13 @@ fn config_event_touches(event: &Event, target_path: &Path) -> bool {
 
 struct WarmthApplier {
     gamma: GammaClient,
+    state_store: ActorRef<StateStore>,
     generation: Arc<AtomicU64>,
 }
 
 impl WarmthApplier {
-    async fn start(gamma: GammaClient) -> ActorRef<Self> {
-        let reference = Self::spawn(Self { gamma, generation: Arc::new(AtomicU64::new(0)) });
+    async fn start(gamma: GammaClient, state_store: ActorRef<StateStore>) -> ActorRef<Self> {
+        let reference = Self::spawn(Self { gamma, state_store, generation: Arc::new(AtomicU64::new(0)) });
         reference.wait_for_startup().await;
         reference
     }
@@ -707,20 +734,22 @@ impl Message<WarmthApplication> for WarmthApplier {
         let generation = self.next_generation();
         let active = Arc::clone(&self.generation);
         let gamma = self.gamma.clone();
+        let state_store = self.state_store.clone();
         context.spawn(async move {
             match message {
                 WarmthApplication::Set { kelvin } => {
-                    if active.load(Ordering::SeqCst) == generation
-                        && let Err(error) = gamma.set_temperature(kelvin).await
-                    {
-                        eprintln!("chroma-daemon warmth apply error: {error}");
+                    if active.load(Ordering::SeqCst) == generation {
+                        match gamma.set_temperature(kelvin).await {
+                            Ok(()) => record_applied_warmth(state_store, kelvin, true).await,
+                            Err(error) => eprintln!("chroma-daemon warmth apply error: {error}"),
+                        }
                     }
                 }
                 WarmthApplication::Ramp { target, duration } => {
-                    run_warmth_ramp(gamma, active, generation, target, duration).await;
+                    run_warmth_ramp(gamma, state_store, active, generation, target, duration).await;
                 }
                 WarmthApplication::RampFrom { current, target, duration } => {
-                    run_warmth_ramp_from(gamma, active, generation, current, target, duration).await;
+                    run_warmth_ramp_from(gamma, state_store, active, generation, current, target, duration).await;
                 }
                 WarmthApplication::Interrupt => {}
             }
@@ -795,6 +824,7 @@ impl Message<BrightnessApplication> for BrightnessApplier {
 
 async fn run_warmth_ramp(
     gamma: GammaClient,
+    state_store: ActorRef<StateStore>,
     active: Arc<AtomicU64>,
     generation: u64,
     target: KelvinTemperature,
@@ -807,11 +837,12 @@ async fn run_warmth_ramp(
             return;
         }
     };
-    run_warmth_ramp_from(gamma, active, generation, from, target, duration).await;
+    run_warmth_ramp_from(gamma, state_store, active, generation, from, target, duration).await;
 }
 
 async fn run_warmth_ramp_from(
     gamma: GammaClient,
+    state_store: ActorRef<StateStore>,
     active: Arc<AtomicU64>,
     generation: u64,
     from: KelvinTemperature,
@@ -825,6 +856,7 @@ async fn run_warmth_ramp_from(
         eprintln!("chroma-daemon warmth ramp apply error: {error}");
         return;
     }
+    record_applied_warmth(state_store.clone(), from, from == target).await;
     if from == target {
         return;
     }
@@ -839,13 +871,25 @@ async fn run_warmth_ramp_from(
         }
         let elapsed = start.elapsed();
         let fraction = (elapsed.as_secs_f64() / total.as_secs_f64()).min(1.0);
-        if let Err(error) = gamma.set_temperature(from.lerp_to(target, fraction)).await {
+        let current = from.lerp_to(target, fraction);
+        if let Err(error) = gamma.set_temperature(current).await {
             eprintln!("chroma-daemon warmth ramp apply error: {error}");
             return;
         }
+        record_applied_warmth(state_store.clone(), current, fraction >= 1.0).await;
         if fraction >= 1.0 {
             return;
         }
+    }
+}
+
+async fn record_applied_warmth(
+    state_store: ActorRef<StateStore>,
+    kelvin: KelvinTemperature,
+    transition_complete: bool,
+) {
+    if let Err(error) = state_store.ask(RecordAppliedWarmth { kelvin, transition_complete }).await {
+        eprintln!("chroma-daemon warmth state record error: {error}");
     }
 }
 

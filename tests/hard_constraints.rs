@@ -164,8 +164,8 @@ fn hc_chroma_017_schedule_reconciliation_applies_only_changed_values() {
     let daemon_source = include_str!("../src/daemon.rs");
 
     assert!(daemon_source.contains("theme != self.theme"));
-    assert!(daemon_source.contains("kelvin != self.warmth"));
-    assert!(daemon_source.contains("target_kelvin != self.warmth"));
+    assert!(daemon_source.contains("state.requires_settle_at(kelvin)"));
+    assert!(daemon_source.contains("state.requires_transition_to(target_kelvin)"));
     assert!(daemon_source.contains("percent != self.brightness"));
     assert!(daemon_source.contains("target_percent != self.brightness"));
 }
@@ -193,4 +193,20 @@ fn hc_chroma_018_stale_location_refresh_retries_with_a_held_location() {
     assert!(daemon_source.contains("self.location_lease.renew(fresh_location);"));
     assert!(geoclue_source.contains("pub struct FreshLocationLease"));
     assert!(geoclue_source.contains("self.held.filter(|location| location.is_current_at(now))"));
+}
+
+#[test]
+fn hc_chroma_019_warmth_recovery_keeps_target_distinct_from_applied_state() {
+    let daemon_source = include_str!("../src/daemon.rs");
+    let state_source = include_str!("../src/state.rs");
+
+    assert!(state_source.contains("struct StoredWarmthState"));
+    assert!(state_source.contains("desired_kelvin"));
+    assert!(state_source.contains("applied_kelvin"));
+    assert!(state_source.contains("projected_kelvin"));
+    assert!(state_source.contains("requires_transition_to"));
+    assert!(state_source.contains("RecordAppliedWarmth"));
+    assert!(daemon_source.contains("warmth.project_transition(current, target)"));
+    assert!(daemon_source.contains("StoredWarmthState::projected_transition(current, target)"));
+    assert!(daemon_source.contains("if let Some(warmth) = self.warmth"));
 }
