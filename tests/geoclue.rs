@@ -4,7 +4,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use chroma::{
     Error, FreshLocationLease, GeoclueLocationFix, GeoclueLocationUpdate, GeoclueLocationUpdateAwaiter, Location,
-    MAX_LOCATION_AGE, MINIMUM_SOLAR_CLOCK_VALIDITY,
+    LocationAuthority, MAX_LOCATION_ACCURACY_METERS, MAX_LOCATION_AGE, MINIMUM_SOLAR_CLOCK_VALIDITY,
 };
 use futures_util::stream;
 use tokio::sync::oneshot;
@@ -67,7 +67,7 @@ fn root_location_update_is_rejected_before_any_location_property_read() {
 #[test]
 fn stale_geoclue_fix_is_rejected_before_solar_schedule_projection() {
     let now = UNIX_EPOCH + MAX_LOCATION_AGE + Duration::from_secs(1);
-    let fix = GeoclueLocationFix::new(Location { latitude: 0.0, longitude: 0.0 }, 25_000.0, (0, 0));
+    let fix = GeoclueLocationFix::new(Location { latitude: 0.0, longitude: 0.0 }, 25.0, (0, 0));
 
     let error = fix.location_at(now).expect_err("stale fix cannot select solar waypoints");
     assert!(matches!(error, Error::GeoclueLocationStale { age_seconds } if age_seconds > MAX_LOCATION_AGE.as_secs()));
@@ -77,7 +77,7 @@ fn stale_geoclue_fix_is_rejected_before_solar_schedule_projection() {
 fn fresh_geoclue_fix_is_accepted_for_solar_schedule_projection() {
     let measured_at = UNIX_EPOCH + Duration::from_secs(1_000_000);
     let location = Location { latitude: 1.0, longitude: 1.0 };
-    let fix = GeoclueLocationFix::new(location, 25_000.0, (1_000_000, 0));
+    let fix = GeoclueLocationFix::new(location, MAX_LOCATION_ACCURACY_METERS, (1_000_000, 0));
 
     assert_eq!(
         fix.location_at(measured_at + Duration::from_secs(1)).expect("fresh fix is accepted").location(),
@@ -86,10 +86,25 @@ fn fresh_geoclue_fix_is_accepted_for_solar_schedule_projection() {
 }
 
 #[test]
+fn imprecise_geoclue_fix_is_rejected_before_solar_schedule_projection() {
+    let measured_at = UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let fix = GeoclueLocationFix::new(
+        Location { latitude: 1.0, longitude: 1.0 },
+        MAX_LOCATION_ACCURACY_METERS + 0.1,
+        (1_000_000, 0),
+    );
+
+    let error = fix.location_at(measured_at).expect_err("a fix wider than 1 km cannot select solar waypoints");
+    assert!(
+        matches!(error, Error::GeoclueLocationImprecise { accuracy_meters } if accuracy_meters > MAX_LOCATION_ACCURACY_METERS)
+    );
+}
+
+#[test]
 fn nearly_expired_geoclue_fix_is_rejected_before_it_can_flash_solar_time() {
     let measured_at = UNIX_EPOCH + Duration::from_secs(1_000_000);
     let now = measured_at + MAX_LOCATION_AGE - MINIMUM_SOLAR_CLOCK_VALIDITY + Duration::from_secs(1);
-    let fix = GeoclueLocationFix::new(Location { latitude: 1.0, longitude: 1.0 }, 25_000.0, (1_000_000, 0));
+    let fix = GeoclueLocationFix::new(Location { latitude: 1.0, longitude: 1.0 }, 25.0, (1_000_000, 0));
 
     let error = fix.location_at(now).expect_err("near-expiry fix cannot drive a status-bar projection");
     assert!(matches!(error, Error::GeoclueLocationExpiresSoon { remaining_seconds }
@@ -100,7 +115,7 @@ fn nearly_expired_geoclue_fix_is_rejected_before_it_can_flash_solar_time() {
 fn held_fix_survives_renewal_failures_until_actual_expiry() {
     let measured_at = UNIX_EPOCH + Duration::from_secs(1_000_000);
     let location = Location { latitude: 1.0, longitude: 1.0 };
-    let held = GeoclueLocationFix::new(location, 25_000.0, (1_000_000, 0))
+    let held = GeoclueLocationFix::new(location, 25.0, (1_000_000, 0))
         .location_at(measured_at)
         .expect("initial fix has its full lease");
     let mut lease = FreshLocationLease::new();
@@ -118,26 +133,32 @@ fn held_fix_survives_renewal_failures_until_actual_expiry() {
         );
     }
     assert!(
-        lease.current_at(measured_at + Duration::from_secs(301)).is_none(),
-        "the held fix becomes unavailable only after its actual expiry"
+        matches!(lease.authority_at(measured_at + Duration::from_secs(301)), LocationAuthority::Unlocated),
+        "the held fix becomes explicitly unlocated only after its actual expiry"
     );
 }
 
 #[test]
-fn insufficient_lifetime_replacement_does_not_displace_held_fix() {
+fn rejected_replacement_does_not_displace_held_fix() {
     let measured_at = UNIX_EPOCH + Duration::from_secs(1_000_000);
     let held_location = Location { latitude: 1.0, longitude: 1.0 };
     let mut lease = FreshLocationLease::new();
     lease.renew(
-        GeoclueLocationFix::new(held_location, 25_000.0, (1_000_000, 0))
+        GeoclueLocationFix::new(held_location, 25.0, (1_000_000, 0))
             .location_at(measured_at)
             .expect("initial fix is accepted"),
     );
 
     let renewal_time = measured_at + MAX_LOCATION_AGE - MINIMUM_SOLAR_CLOCK_VALIDITY;
-    let cached_replacement =
-        GeoclueLocationFix::new(Location { latitude: 2.0, longitude: 2.0 }, 25_000.0, (1_000_000, 0));
-    assert!(cached_replacement.location_at(renewal_time + Duration::from_secs(1)).is_err());
+    let imprecise_replacement = GeoclueLocationFix::new(
+        Location { latitude: 2.0, longitude: 2.0 },
+        MAX_LOCATION_ACCURACY_METERS + 1.0,
+        (1_000_000, 0),
+    );
+    assert!(matches!(
+        imprecise_replacement.location_at(renewal_time + Duration::from_secs(1)),
+        Err(Error::GeoclueLocationImprecise { .. })
+    ));
     assert_eq!(
         lease
             .current_at(renewal_time + Duration::from_secs(1))
@@ -145,4 +166,9 @@ fn insufficient_lifetime_replacement_does_not_displace_held_fix() {
             .location(),
         held_location
     );
+}
+
+#[test]
+fn a_new_lease_starts_explicitly_unlocated() {
+    assert!(matches!(FreshLocationLease::new().authority_at(UNIX_EPOCH), LocationAuthority::Unlocated));
 }

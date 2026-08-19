@@ -51,6 +51,10 @@ pub enum Error {
     #[error("geoclue returned an invalid location accuracy")]
     GeoclueInvalidAccuracy,
 
+    /// GeoClue returned a valid but too-imprecise location for solar schedules.
+    #[error("geoclue location accuracy exceeds Chroma's 1 km limit ({accuracy_meters:.0}m)")]
+    GeoclueLocationImprecise { accuracy_meters: f64 },
+
     /// GeoClue returned a location whose measurement timestamp is not usable.
     #[error("geoclue returned an invalid location timestamp")]
     GeoclueInvalidTimestamp,

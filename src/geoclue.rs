@@ -16,6 +16,13 @@ use crate::schedule::Location;
 /// Maximum accepted age of a GeoClue fix at the time Chroma receives it.
 pub const MAX_LOCATION_AGE: Duration = Duration::from_secs(300);
 
+/// Maximum uncertainty for a GeoClue fix that may drive solar schedules.
+///
+/// A wider fix can move civil events enough to make Chroma's visual state
+/// wrong for the place where it is running. It is therefore not a degraded
+/// replacement for a held precise fix.
+pub const MAX_LOCATION_ACCURACY_METERS: f64 = 1_000.0;
+
 /// A replacement fix needs enough remaining freshness for an early renewal
 /// attempt plus several bounded retries. Shorter-lived cached fixes are not
 /// allowed to displace a still-valid held fix.
@@ -83,6 +90,17 @@ pub struct FreshGeoclueLocation {
     expires_at: SystemTime,
 }
 
+/// The authoritative location state at a particular instant.
+///
+/// An expired or never-acquired fix is deliberately represented as
+/// [`Unlocated`](Self::Unlocated), not as a guessed location or a schedule
+/// default. A held good fix remains located until its own expiry.
+#[derive(Debug, Clone, Copy)]
+pub enum LocationAuthority {
+    Unlocated,
+    Located(FreshGeoclueLocation),
+}
+
 /// The schedule actor's held authoritative location lease.
 ///
 /// Failed or insufficient-lifetime renewals leave this lease unchanged. That
@@ -109,9 +127,20 @@ impl FreshLocationLease {
         self.held.is_some()
     }
 
+    /// Resolve the current terminal state without guessing a location.
+    pub fn authority_at(self, now: SystemTime) -> LocationAuthority {
+        match self.held.filter(|location| location.is_current_at(now)) {
+            Some(location) => LocationAuthority::Located(location),
+            None => LocationAuthority::Unlocated,
+        }
+    }
+
     /// Return the held fix through its actual expiry instant.
     pub fn current_at(self, now: SystemTime) -> Option<FreshGeoclueLocation> {
-        self.held.filter(|location| location.is_current_at(now))
+        match self.authority_at(now) {
+            LocationAuthority::Located(location) => Some(location),
+            LocationAuthority::Unlocated => None,
+        }
     }
 }
 
@@ -146,6 +175,9 @@ impl GeoclueLocationFix {
     pub fn location_at(self, now: SystemTime) -> Result<FreshGeoclueLocation> {
         if !self.accuracy_meters.is_finite() || self.accuracy_meters < 0.0 {
             return Err(Error::GeoclueInvalidAccuracy);
+        }
+        if self.accuracy_meters > MAX_LOCATION_ACCURACY_METERS {
+            return Err(Error::GeoclueLocationImprecise { accuracy_meters: self.accuracy_meters });
         }
         if self.timestamp_microseconds >= 1_000_000 {
             return Err(Error::GeoclueInvalidTimestamp);
