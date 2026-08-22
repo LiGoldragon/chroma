@@ -34,8 +34,8 @@ use crate::response::Response;
 use crate::schedule::{Location, SchedulePlan, ScheduledBrightness, ScheduledValues, ScheduledWarmth};
 use crate::solar_time::SolarClockProjection;
 use crate::state::{
-    ReadStoredLocation, ReadStoredState, RecordAppliedWarmth, RecordBrightness, RecordLocation, RecordTheme,
-    RecordWarmth, StateStore, StoredThemeState, StoredVisualState, StoredWarmthState,
+    HasStoredTheme, ReadStoredLocation, ReadStoredState, RecordAppliedWarmth, RecordBrightness, RecordLocation,
+    RecordTheme, RecordWarmth, StateStore, StoredThemeState, StoredVisualState, StoredWarmthState,
 };
 use crate::theme::{ApplyTheme, ThemeApplier, ThemeMode};
 use crate::theme_dbus::{
@@ -146,6 +146,8 @@ impl ChromaRoot {
         state_store: ActorRef<StateStore>,
     ) -> Result<ActorRef<Self>> {
         state_store.wait_for_startup().await;
+        let has_persisted_theme =
+            state_store.ask(HasStoredTheme).await.map_err(|error| Error::ActorCall { message: error.to_string() })?;
 
         let fallback = StoredVisualState {
             theme: config.theme.schedule.default_mode(),
@@ -181,7 +183,8 @@ impl ChromaRoot {
         });
         reference.wait_for_startup().await;
         let schedule_engine =
-            ScheduleEngine::start(config, reference.clone(), state_store.clone(), stored_location).await;
+            ScheduleEngine::start(config, reference.clone(), state_store.clone(), stored_location, has_persisted_theme)
+                .await;
         reference
             .ask(InstallSchedule { schedule_engine })
             .await
@@ -410,7 +413,8 @@ impl ChromaRoot {
             .ask(ReadStoredLocation)
             .await
             .map_err(|error| Error::ActorCall { message: error.to_string() })?;
-        let next_schedule_engine = ScheduleEngine::start(config, root, self.state_store.clone(), stored_location).await;
+        let next_schedule_engine =
+            ScheduleEngine::start(config, root, self.state_store.clone(), stored_location, false).await;
         let previous_theme_applier = std::mem::replace(&mut self.theme_applier, next_theme_applier);
         let previous_schedule_engine = self.schedule_engine.replace(next_schedule_engine.clone());
 
@@ -438,15 +442,33 @@ fn next_theme_revision(current: u64, mode_changed: bool) -> Result<Option<u64>> 
     current.checked_add(1).map(Some).ok_or(Error::ThemeRevisionExhausted)
 }
 
+fn startup_schedule_values(mut values: ScheduledValues, preserve_persisted_theme: bool) -> ScheduledValues {
+    if preserve_persisted_theme {
+        values.theme = None;
+    }
+    values
+}
+
 #[cfg(test)]
 mod revision_tests {
-    use super::next_theme_revision;
+    use super::{next_theme_revision, startup_schedule_values};
     use crate::error::Error;
+    use crate::schedule::ScheduledValues;
+    use crate::theme::ThemeMode;
 
     #[test]
     fn a_real_theme_change_at_the_revision_limit_has_no_revision_to_persist_publish_or_apply() {
         assert!(matches!(next_theme_revision(u64::MAX, true), Err(Error::ThemeRevisionExhausted)));
         assert_eq!(next_theme_revision(u64::MAX, false).expect("same mode remains a no-op"), None);
+    }
+
+    #[test]
+    fn restart_reconciliation_keeps_a_durable_theme_out_of_startup_config_application() {
+        let values = startup_schedule_values(
+            ScheduledValues { theme: Some(ThemeMode::Light), warmth: None, brightness: None },
+            true,
+        );
+        assert_eq!(values.theme(), None);
     }
 }
 
@@ -501,7 +523,7 @@ struct DispatchOutcome {
     response: Response,
 }
 
-struct BeginSchedule;
+pub(crate) struct BeginSchedule;
 
 impl Message<BeginSchedule> for ChromaRoot {
     type Reply = Result<()>;
@@ -1129,6 +1151,7 @@ struct ScheduleEngine {
     location_lease: FreshLocationLease,
     schedule_generation: u64,
     location_generation: u64,
+    preserve_persisted_theme_on_start: bool,
 }
 
 impl ScheduleEngine {
@@ -1137,8 +1160,10 @@ impl ScheduleEngine {
         root: ActorRef<ChromaRoot>,
         state_store: ActorRef<StateStore>,
         location: Option<Location>,
+        preserve_persisted_theme_on_start: bool,
     ) -> ActorRef<Self> {
-        let reference = Self::spawn(ScheduleArgs { config, root, state_store, location });
+        let reference =
+            Self::spawn(ScheduleArgs { config, root, state_store, location, preserve_persisted_theme_on_start });
         reference.wait_for_startup().await;
         reference
     }
@@ -1181,7 +1206,9 @@ impl ScheduleEngine {
     async fn reconcile(&mut self, generation: u64, context: &mut Context<Self, ()>) {
         let now = Local::now();
         let plan = SchedulePlan::from_config(&self.config, self.location, now);
-        if let Err(error) = self.root.tell(ApplyScheduledState { values: plan.values() }).await {
+        let values = startup_schedule_values(plan.values(), self.preserve_persisted_theme_on_start);
+        self.preserve_persisted_theme_on_start = false;
+        if let Err(error) = self.root.tell(ApplyScheduledState { values }).await {
             eprintln!("chroma-daemon schedule enqueue error: {error}");
         }
         if let Some(next) = plan.next_delay_from(now) {
@@ -1236,6 +1263,7 @@ struct ScheduleArgs {
     root: ActorRef<ChromaRoot>,
     state_store: ActorRef<StateStore>,
     location: Option<Location>,
+    preserve_persisted_theme_on_start: bool,
 }
 
 impl Actor for ScheduleEngine {
@@ -1251,6 +1279,7 @@ impl Actor for ScheduleEngine {
             location_lease: FreshLocationLease::new(),
             schedule_generation: 0,
             location_generation: 0,
+            preserve_persisted_theme_on_start: args.preserve_persisted_theme_on_start,
         })
     }
 }

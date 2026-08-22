@@ -434,6 +434,17 @@ impl Message<ReadStoredState> for StateStore {
     }
 }
 
+/// Whether a desired theme snapshot was already durable before startup.
+pub struct HasStoredTheme;
+
+impl Message<HasStoredTheme> for StateStore {
+    type Reply = Result<bool>;
+
+    async fn handle(&mut self, _message: HasStoredTheme, _context: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        Ok(self.read_theme()?.is_some())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReadStoredLocation;
 

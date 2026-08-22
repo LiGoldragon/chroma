@@ -47,6 +47,12 @@ acknowledgement status are intentionally transient, beginning `Unavailable`
 after a Chroma restart. This is an inspection surface, not a claim that this
 wire is permanent.
 
+On a virgin store, the configured theme initializes revision zero. Once a
+snapshot exists, daemon startup resumes that exact desired mode and revision;
+the initial schedule reconciliation does not reinterpret startup configuration
+as a new desired-state change. Later schedule fires and live configuration
+reloads retain their normal authority.
+
 The private daemon witness runs on a fresh session bus:
 `dbus-run-session -- cargo test --lib actual_theme_dbus_service_binds_the_real_protocol_to_unique_bus_owners -- --ignored`.
 Nix exposes the same witness as `checks.session-dbus`.

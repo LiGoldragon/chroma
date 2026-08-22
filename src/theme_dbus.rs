@@ -414,8 +414,8 @@ mod private_session_bus_tests {
     use super::*;
     use crate::brightness::{BrightnessAxis, BrightnessLevel, BrightnessSchedule};
     use crate::config::Config;
-    use crate::daemon::ChromaRoot;
-    use crate::state::StateStore;
+    use crate::daemon::{BeginSchedule, ChromaRoot};
+    use crate::state::{RecordTheme, StateStore, StoredThemeState};
     use crate::theme::{ThemeAdapters, ThemeAxis, ThemePalette, ThemePalettes, ThemeSchedule};
     use crate::warmth::{WarmthAxis, WarmthLevel, WarmthSchedule};
     use futures_util::StreamExt;
@@ -441,7 +441,7 @@ mod private_session_bus_tests {
         ThemePalette::from_base16_slots(["#000000"; 16])
     }
 
-    fn config() -> Config {
+    fn config(mode: ThemeMode) -> Config {
         Config {
             theme: ThemeAxis {
                 concerns: vec![],
@@ -450,7 +450,7 @@ mod private_session_bus_tests {
                 font_point_size: 12,
                 ghostty_config_templates: None,
                 pi_theme_control: None,
-                schedule: ThemeSchedule::Manual(ThemeMode::Dark),
+                schedule: ThemeSchedule::Manual(mode),
             },
             warmth: WarmthAxis { schedule: WarmthSchedule::Manual(WarmthLevel::Neutral) },
             brightness: BrightnessAxis { schedule: BrightnessSchedule::Manual(BrightnessLevel::Bright) },
@@ -468,7 +468,14 @@ mod private_session_bus_tests {
         let state =
             StateStore::spawn_in_thread(StateStore::open(directory.path().join("state.redb")).expect("open redb"));
         state.wait_for_startup().await;
-        let root = ChromaRoot::start_with_state_store(config(), state).await.expect("start actual chroma root");
+        state
+            .ask(RecordTheme { state: StoredThemeState::new(ThemeMode::Dark, 1) })
+            .await
+            .expect("persist desired state before daemon restart");
+        let root = ChromaRoot::start_with_state_store(config(ThemeMode::Light), state)
+            .await
+            .expect("restart actual chroma root from durable state");
+        root.ask(BeginSchedule).await.expect("run daemon startup reconciliation");
         let service = ThemeDbusService::start(root.clone()).await.expect("register actual Chroma service");
 
         let client = Connection::session().await.expect("connect first client");
@@ -477,9 +484,9 @@ mod private_session_bus_tests {
             .expect("build real protocol proxy");
         let registered: (String, u64) =
             proxy.call("RegisterConsumer", &(EMACS_CONSUMER,)).await.expect("register consumer");
-        assert_eq!(registered, ("Dark".to_owned(), 0));
+        assert_eq!(registered, ("Dark".to_owned(), 1));
         let status: (String, u64) = proxy.call("GetProjectionStatus", &(EMACS_CONSUMER,)).await.expect("query status");
-        assert_eq!(status, ("Pending".to_owned(), 0));
+        assert_eq!(status, ("Pending".to_owned(), 1));
 
         let second = Connection::session().await.expect("connect second client");
         let second_proxy = zbus::Proxy::new(&second, THEME_SERVICE, THEME_OBJECT_PATH, THEME_INTERFACE)
@@ -493,12 +500,12 @@ mod private_session_bus_tests {
             .call("GetProjectionStatus", &(EMACS_CONSUMER,))
             .await
             .expect("query after unrelated-name release");
-        assert_eq!(status, ("Pending".to_owned(), 0));
+        assert_eq!(status, ("Pending".to_owned(), 1));
         assert!(
-            proxy.call::<_, _, ()>("ReportProjection", &(EMACS_CONSUMER, 0_u64, "Failed", "wrong", "x")).await.is_err()
+            proxy.call::<_, _, ()>("ReportProjection", &(EMACS_CONSUMER, 1_u64, "Failed", "wrong", "x")).await.is_err()
         );
         proxy
-            .call::<_, _, ()>("ReportProjection", &(EMACS_CONSUMER, 0_u64, "Applied", "", ""))
+            .call::<_, _, ()>("ReportProjection", &(EMACS_CONSUMER, 1_u64, "Applied", "", ""))
             .await
             .expect("fixed five-argument applied report");
 
@@ -534,13 +541,13 @@ mod private_session_bus_tests {
             }
             tokio::task::yield_now().await;
         }
-        assert_eq!(status, ("Unavailable".to_owned(), 0));
+        assert_eq!(status, ("Unavailable".to_owned(), 1));
 
         service.stop().await;
         let restarted = ThemeDbusService::start(root).await.expect("restart actual Chroma service");
         let status: (String, u64) =
             second_proxy.call("GetProjectionStatus", &(EMACS_CONSUMER,)).await.expect("query after service restart");
-        assert_eq!(status, ("Unavailable".to_owned(), 0));
+        assert_eq!(status, ("Unavailable".to_owned(), 1));
         restarted.stop().await;
     }
 }

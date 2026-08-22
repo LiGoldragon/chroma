@@ -41,8 +41,8 @@ pub use response::Response;
 pub use schedule::{Location, SchedulePlan, ScheduledBrightness, ScheduledValues, ScheduledWarmth};
 pub use solar_time::SolarClockProjection;
 pub use state::{
-    ReadStoredLocation, ReadStoredState, RecordAppliedWarmth, RecordBrightness, RecordLocation, RecordTheme,
-    RecordWarmth, StateStore, StoredLocation, StoredThemeState, StoredVisualState, StoredWarmthState,
+    HasStoredTheme, ReadStoredLocation, ReadStoredState, RecordAppliedWarmth, RecordBrightness, RecordLocation,
+    RecordTheme, RecordWarmth, StateStore, StoredLocation, StoredThemeState, StoredVisualState, StoredWarmthState,
 };
 pub use theme::{
     ApplyTheme, GhosttyConfigChange, GhosttyConfigFile, GhosttyConfigTemplates, PiThemeControl,
