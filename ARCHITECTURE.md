@@ -34,7 +34,8 @@ Chroma owns:
   triggers are used
 - the orchestration of ramps (start, interrupt, replace)
 - the native theme application concerns: terminal, desktop/GTK,
-  Ghostty, Emacs, and running Pi sessions
+  Ghostty, and running Pi sessions
+- the resident Emacs desired-state projection on the same-user session bus
 
 Chroma does **not** own:
 
@@ -97,8 +98,9 @@ Supervisor
 │   ├── TerminalThemeConcern
 │   ├── DesktopThemeConcern
 │   ├── GhosttyThemeConcern
-│   ├── EmacsThemeConcern
 │   └── PiThemeControlConcern
+├── ThemeDbusService                 (same-user resident Emacs protocol)
+│   └── ThemeOwnerWatcher            (NameOwnerChanged → Unavailable)
 ├── WarmthApplier                    (zbus to wl-gammarelay-rs Temperature)
 │   └── generation-cancelled ramp task owned by WarmthApplier
 ├── BrightnessApplier                (zbus to wl-gammarelay-rs Brightness)
@@ -144,13 +146,11 @@ on inotify push. Parses into a typed `Config`:
 ```
 (Config
   (Theme
-    (Concerns Terminal Desktop Ghostty Emacs Pi)
+    (Concerns Terminal Desktop Ghostty Pi)
     (Palettes
       (Dark  (Base00 [#000000]) ... (Base0F [#ff5577]))
       (Light (Base00 [#faf5f0]) ... (Base0F [#cc3355])))
-    (Adapters
-      (Dconf <path>)
-      (Emacsclient <path>))
+    (Adapters (Dconf <path>))
     (GhosttyConfigTemplates
       (Dark <path-to-complete-dark-ghostty-config>)
       (Light <path-to-complete-light-ghostty-config>))
@@ -205,7 +205,7 @@ write back to those source paths.
 
 | Table | Key | Value |
 |---|---|---|
-| `theme` | fixed slot `current` | rkyv archive of `ThemeMode` |
+| `theme` | fixed slot `current` | rkyv archive of atomic `{ThemeMode, revision}`; theme-only old records migrate once to revision 0 |
 | `warmth-state` | fixed slot `current` | rkyv archive of `StoredWarmthState` (desired target, last relay-confirmed temperature, wall-clock projection, transition state) |
 | `brightness` | fixed slot `current` | rkyv archive of `BrightnessState` |
 | `location` | fixed slot `last_known` | rkyv archive of `(Latitude, Longitude)` |

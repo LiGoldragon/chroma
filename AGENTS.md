@@ -18,9 +18,10 @@ It replaces darkman + the `nightshift-*` systemd services + the
   redb, one bounded geoclue location read path, one CLI, one
   socket); their
   scheduled events do not share fires.
-- **Native theme concerns.** `chroma` owns terminal,
-  desktop/GTK, Ghostty, and Emacs theme application as
-  independent concern actors. `SetTheme` returns `Accepted`
+- **Native and resident theme concerns.** `chroma` owns terminal,
+  desktop/GTK, Ghostty, and Pi theme application as independent
+  concern actors. Emacs is an allowlisted resident session-bus
+  consumer, never an `emacsclient` concern. `SetTheme` returns `Accepted`
   after those actors own the message; do not make CLI requests
   wait on desktop mutation. Do not add configured apply
   commands, shell script boundaries, or retained legacy target

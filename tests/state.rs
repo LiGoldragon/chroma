@@ -1,8 +1,8 @@
 //! Durable recovery contracts for Chroma visual state.
 
 use chroma::{
-    BrightnessPercent, KelvinTemperature, ReadStoredState, RecordWarmth, StateStore, StoredVisualState,
-    StoredWarmthState, ThemeMode,
+    BrightnessPercent, KelvinTemperature, ReadStoredState, RecordTheme, RecordWarmth, StateStore, StoredThemeState,
+    StoredVisualState, StoredWarmthState, ThemeMode,
 };
 use kameo::actor::Spawn;
 use redb::{Database, TableDefinition};
@@ -14,6 +14,7 @@ fn kelvin(value: u16) -> KelvinTemperature {
 fn fallback_state() -> StoredVisualState {
     StoredVisualState {
         theme: ThemeMode::Dark,
+        theme_state: StoredThemeState::new(ThemeMode::Dark, 0),
         warmth: Some(StoredWarmthState::settled(kelvin(4_500))),
         percent: BrightnessPercent::new(75),
     }
@@ -104,12 +105,48 @@ async fn absent_or_legacy_warmth_state_never_replays_a_stale_target() {
     store.wait_for_startup().await;
     let restored = store
         .ask(ReadStoredState {
-            fallback: StoredVisualState { theme: ThemeMode::Dark, warmth: None, percent: BrightnessPercent::new(75) },
+            fallback: StoredVisualState {
+                theme: ThemeMode::Dark,
+                theme_state: StoredThemeState::new(ThemeMode::Dark, 0),
+                warmth: None,
+                percent: BrightnessPercent::new(75),
+            },
         })
         .await
         .expect("read current state without old warmth interpretation");
 
     assert_eq!(restored.warmth, None, "the old target is not a current physical warmth state");
+    let _ = store.stop_gracefully().await;
+    store.wait_for_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn theme_snapshot_migrates_a_theme_only_archive_once_at_revision_zero() {
+    const THEME_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("theme");
+    const CURRENT_KEY: &str = "current";
+    let directory = tempfile::tempdir().expect("create temporary state directory");
+    let database_path = directory.path().join("state.redb");
+    let database = Database::create(&database_path).expect("create old database");
+    let old_theme = ThemeMode::Light.archive().expect("archive old theme");
+    let transaction = database.begin_write().expect("open transaction");
+    {
+        let mut table = transaction.open_table(THEME_TABLE).expect("open theme table");
+        table.insert(CURRENT_KEY, old_theme.as_slice()).expect("persist old theme only");
+    }
+    transaction.commit().expect("commit old state");
+    drop(database);
+
+    let store = StateStore::spawn_in_thread(StateStore::open(&database_path).expect("open current state store"));
+    store.wait_for_startup().await;
+    let restored =
+        store.ask(ReadStoredState { fallback: fallback_state() }).await.expect("migrate and read theme state");
+    assert_eq!(restored.theme_state, StoredThemeState::new(ThemeMode::Light, 0));
+    store
+        .ask(RecordTheme { state: StoredThemeState::new(ThemeMode::Dark, 1) })
+        .await
+        .expect("atomically replace snapshot");
+    let reloaded = store.ask(ReadStoredState { fallback: fallback_state() }).await.expect("read replacement");
+    assert_eq!(reloaded.theme_state, StoredThemeState::new(ThemeMode::Dark, 1));
     let _ = store.stop_gracefully().await;
     store.wait_for_shutdown().await;
 }

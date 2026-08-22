@@ -265,8 +265,7 @@ const NATIVE_CONFIG: &str = r##"
         (Base0E #8822bb)
         (Base0F #cc3355)))
     (Adapters
-      (Dconf /bin/dconf)
-      (Emacsclient /bin/emacsclient))
+      (Dconf /bin/dconf))
     (FontPointSize 14)
     (GhosttyConfigTemplates
       (Dark /tmp/chroma-test/dark.ghostty)

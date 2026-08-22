@@ -28,8 +28,40 @@ const CURRENT_KEY: &str = "current";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StoredVisualState {
     pub theme: ThemeMode,
+    pub theme_state: StoredThemeState,
     pub warmth: Option<StoredWarmthState>,
     pub percent: BrightnessPercent,
+}
+
+/// The atomically persisted desired theme and its D-Bus revision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
+pub struct StoredThemeState {
+    mode: ThemeMode,
+    revision: u64,
+}
+
+impl StoredThemeState {
+    pub const fn new(mode: ThemeMode, revision: u64) -> Self {
+        Self { mode, revision }
+    }
+
+    pub const fn mode(self) -> ThemeMode {
+        self.mode
+    }
+
+    pub const fn revision(self) -> u64 {
+        self.revision
+    }
+
+    fn archive(&self) -> Result<Vec<u8>> {
+        rkyv::to_bytes::<rkyv::rancor::Error>(self)
+            .map(|bytes| bytes.to_vec())
+            .map_err(|err| Error::RkyvCodec(err.to_string()))
+    }
+
+    fn from_archive(bytes: &[u8]) -> Result<Self> {
+        rkyv::from_bytes::<Self, rkyv::rancor::Error>(bytes).map_err(|err| Error::RkyvCodec(err.to_string()))
+    }
 }
 
 /// Durable warmth intent, physical observation, and schedule projection.
@@ -220,8 +252,8 @@ impl StateStore {
         Ok(())
     }
 
-    fn record_theme(&self, mode: ThemeMode) -> Result<()> {
-        self.write_archive(THEME_TABLE, &mode.archive()?)
+    fn record_theme(&self, state: StoredThemeState) -> Result<()> {
+        self.write_archive(THEME_TABLE, &state.archive()?)
     }
 
     fn record_warmth(&self, state: StoredWarmthState) -> Result<()> {
@@ -254,20 +286,30 @@ impl StateStore {
     }
 
     fn read_state(&self, fallback: StoredVisualState) -> Result<StoredVisualState> {
+        let theme_state = self.read_theme()?.unwrap_or(fallback.theme_state);
         Ok(StoredVisualState {
-            theme: self.read_theme()?.unwrap_or(fallback.theme),
+            theme: theme_state.mode(),
+            theme_state,
             warmth: self.read_warmth()?.or(fallback.warmth),
             percent: self.read_brightness()?.unwrap_or(fallback.percent),
         })
     }
 
-    fn read_theme(&self) -> Result<Option<ThemeMode>> {
+    fn read_theme(&self) -> Result<Option<StoredThemeState>> {
         let transaction = self.database.begin_read()?;
         let table = transaction.open_table(THEME_TABLE)?;
         let Some(bytes) = table.get(CURRENT_KEY)? else {
             return Ok(None);
         };
-        Ok(Some(ThemeMode::from_archive(bytes.value())?))
+        match StoredThemeState::from_archive(bytes.value()) {
+            Ok(state) => Ok(Some(state)),
+            Err(_) => {
+                let mode = ThemeMode::from_archive(bytes.value())?;
+                let migrated = StoredThemeState::new(mode, 0);
+                self.record_theme(migrated)?;
+                Ok(Some(migrated))
+            }
+        }
     }
 
     fn read_warmth(&self) -> Result<Option<StoredWarmthState>> {
@@ -309,14 +351,14 @@ impl Actor for StateStore {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecordTheme {
-    pub mode: ThemeMode,
+    pub state: StoredThemeState,
 }
 
 impl Message<RecordTheme> for StateStore {
     type Reply = Result<()>;
 
     async fn handle(&mut self, message: RecordTheme, _context: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        self.record_theme(message.mode)
+        self.record_theme(message.state)
     }
 }
 

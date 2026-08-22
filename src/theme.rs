@@ -43,6 +43,14 @@ impl ThemeMode {
         }
     }
 
+    /// The closed vocabulary carried on the public session-bus protocol.
+    pub const fn dbus_name(self) -> &'static str {
+        match self {
+            ThemeMode::Dark => "Dark",
+            ThemeMode::Light => "Light",
+        }
+    }
+
     /// Minimal line-protocol frame for live theme-control peers.
     pub const fn pi_control_line(self) -> &'static str {
         match self {
@@ -87,8 +95,6 @@ pub enum ThemeConcern {
     Desktop,
     /// Ghostty configuration.
     Ghostty,
-    /// Running Emacs daemons.
-    Emacs,
     /// Running Pi sessions that expose in-process theme control.
     Pi,
 }
@@ -346,7 +352,6 @@ impl ThemeConcern {
             "Terminal" => Ok(Self::Terminal),
             "Desktop" | "Gtk" | "GTK" => Ok(Self::Desktop),
             "Ghostty" => Ok(Self::Ghostty),
-            "Emacs" => Ok(Self::Emacs),
             "Pi" => Ok(Self::Pi),
             "Legacy" | "ApplyCommand" | "ApplyTargets" => {
                 Err(Error::Config { message: format!("{name} belongs to the removed apply-command architecture") })
@@ -360,7 +365,6 @@ impl ThemeConcern {
             Self::Terminal => "terminal",
             Self::Desktop => "desktop",
             Self::Ghostty => "ghostty",
-            Self::Emacs => "emacs",
             Self::Pi => "pi",
         }
     }
@@ -486,7 +490,6 @@ impl ThemePalettes {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ThemeAdapters {
     pub dconf: Option<PathBuf>,
-    pub emacsclient: Option<PathBuf>,
 }
 
 /// One scheduled theme switch — at this trigger, become this mode.
@@ -577,9 +580,6 @@ impl ThemeApplier {
                         reloader: GhosttyReloader::application_action(),
                     }))
                 }
-                ThemeConcern::Emacs => ThemeConcernReference::Emacs(EmacsThemeConcern::spawn(EmacsThemeConcern {
-                    adapters: axis.adapters.clone(),
-                })),
                 ThemeConcern::Pi => ThemeConcernReference::Pi(PiThemeControlConcern::spawn(PiThemeControlConcern {
                     control: axis.pi_theme_control.clone().unwrap_or_else(PiThemeControl::runtime_default),
                     current_mode: None,
@@ -598,7 +598,6 @@ enum ThemeConcernReference {
     Terminal(ActorRef<TerminalThemeConcern>),
     Desktop(ActorRef<DesktopThemeConcern>),
     Ghostty(ActorRef<GhosttyThemeConcern>),
-    Emacs(ActorRef<EmacsThemeConcern>),
     Pi(ActorRef<PiThemeControlConcern>),
 }
 
@@ -608,7 +607,6 @@ impl ThemeConcernReference {
             Self::Terminal(reference) => reference.wait_for_startup().await,
             Self::Desktop(reference) => reference.wait_for_startup().await,
             Self::Ghostty(reference) => reference.wait_for_startup().await,
-            Self::Emacs(reference) => reference.wait_for_startup().await,
             Self::Pi(reference) => reference.wait_for_startup().await,
         }
     }
@@ -618,7 +616,6 @@ impl ThemeConcernReference {
             Self::Terminal(reference) => reference.tell(ApplyThemeConcern { mode }).await,
             Self::Desktop(reference) => reference.tell(ApplyThemeConcern { mode }).await,
             Self::Ghostty(reference) => reference.tell(ApplyThemeConcern { mode }).await,
-            Self::Emacs(reference) => reference.tell(ApplyThemeConcern { mode }).await,
             Self::Pi(reference) => reference.tell(ApplyThemeConcern { mode }).await,
         }
         .map_err(|error| Error::ActorCall { message: error.to_string() })
@@ -635,10 +632,6 @@ impl ThemeConcernReference {
                 reference.wait_for_shutdown().await;
             }
             Self::Ghostty(reference) => {
-                let _ = reference.stop_gracefully().await;
-                reference.wait_for_shutdown().await;
-            }
-            Self::Emacs(reference) => {
                 let _ = reference.stop_gracefully().await;
                 reference.wait_for_shutdown().await;
             }
@@ -970,57 +963,6 @@ impl Message<DeliverPiThemeInitialSnapshot> for PiThemeControlConcern {
     async fn handle(&mut self, message: DeliverPiThemeInitialSnapshot, _context: &mut Context<Self, Self::Reply>) {
         if message.generation == self.registry_generation {
             self.send_initial_snapshot().await;
-        }
-    }
-}
-
-struct EmacsThemeConcern {
-    adapters: ThemeAdapters,
-}
-
-impl Actor for EmacsThemeConcern {
-    type Args = Self;
-    type Error = Infallible;
-
-    async fn on_start(concern: Self::Args, _reference: ActorRef<Self>) -> std::result::Result<Self, Self::Error> {
-        Ok(concern)
-    }
-}
-
-impl Message<ApplyThemeConcern> for EmacsThemeConcern {
-    type Reply = ();
-
-    async fn handle(&mut self, message: ApplyThemeConcern, _context: &mut Context<Self, Self::Reply>) {
-        if let Err(error) = self.apply(message.mode).await {
-            eprintln!("chroma-daemon emacs theme concern error: {error}");
-        }
-    }
-}
-
-impl EmacsThemeConcern {
-    async fn apply(&self, mode: ThemeMode) -> Result<()> {
-        let Some(emacsclient) = &self.adapters.emacsclient else {
-            return Ok(());
-        };
-        let theme = if mode == ThemeMode::Dark { "ignis-dark" } else { "ignis-light" };
-        let expression = format!(
-            "(progn (add-to-list 'custom-theme-load-path \"$HOME/.config/emacs-ignis-themes\") \
-             (mapc #'disable-theme custom-enabled-themes) (load-theme '{theme} t))"
-        );
-        let mut child = tokio::process::Command::new(emacsclient)
-            .args(["--eval", &expression])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()?;
-
-        match timeout(Duration::from_secs(2), child.wait()).await {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(error)) => Err(error.into()),
-            Err(_) => {
-                let _ = child.kill().await;
-                Err(Error::Daemon { message: "emacsclient theme update timed out".into() })
-            }
         }
     }
 }

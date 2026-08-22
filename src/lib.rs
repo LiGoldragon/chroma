@@ -24,6 +24,7 @@ pub mod schedule;
 pub mod solar_time;
 pub mod state;
 pub mod theme;
+pub mod theme_dbus;
 pub mod time;
 pub mod warmth;
 pub mod wire;
@@ -41,12 +42,13 @@ pub use schedule::{Location, SchedulePlan, ScheduledBrightness, ScheduledValues,
 pub use solar_time::SolarClockProjection;
 pub use state::{
     ReadStoredLocation, ReadStoredState, RecordAppliedWarmth, RecordBrightness, RecordLocation, RecordTheme,
-    RecordWarmth, StateStore, StoredLocation, StoredVisualState, StoredWarmthState,
+    RecordWarmth, StateStore, StoredLocation, StoredThemeState, StoredVisualState, StoredWarmthState,
 };
 pub use theme::{
     ApplyTheme, GhosttyConfigChange, GhosttyConfigFile, GhosttyConfigTemplates, PiThemeControl,
     PiThemeControlRegistryDirectory, ThemeAdapters, ThemeApplier, ThemeAxis, ThemeConcern, ThemeMode, ThemePalette,
     ThemePalettes, ThemeSchedule, ThemeWaypoint,
 };
+pub use theme_dbus::{ProjectionError, ProjectionReport, ProjectionStatus, ThemeProjection, ThemeSnapshot};
 pub use time::{LocalHour, LocalMinute, RampDuration, RampTrigger, RelativeSolarOffset, SignedMinutes};
 pub use warmth::{KelvinTemperature, WarmthAxis, WarmthLevel, WarmthSchedule, WarmthWaypoint};

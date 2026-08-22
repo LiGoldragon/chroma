@@ -344,7 +344,6 @@ fn parse_theme_adapters(nodes: Option<&[ConfigNode]>) -> Result<ThemeAdapters> {
         let path = PathBuf::from(required_atom(body, head)?);
         match head.as_str() {
             "Dconf" => adapters.dconf = Some(path),
-            "Emacsclient" => adapters.emacsclient = Some(path),
             _ => return Err(Error::Config { message: format!("unknown adapter {head}") }),
         }
     }

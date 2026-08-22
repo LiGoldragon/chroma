@@ -27,10 +27,12 @@ socket); their scheduled events do not share fires.
 These are non-negotiable; an edit that breaks them needs a
 report, not a pull request.
 
-1. **Theme apply is native concern actors.** Chroma owns
-   terminal, desktop/GTK, Ghostty, and Emacs theme application
-   directly. There is no configured apply command, no shell
-   script boundary, and no retained legacy target schema.
+1. **Theme apply is native and resident.** Chroma owns terminal,
+   desktop/GTK, Ghostty, and Pi application directly. Emacs is the
+   allowlisted `emacs` resident session-bus projection, bound to the
+   caller's unique sender. There is no configured apply command,
+   shell script boundary, retained legacy target schema, or
+   `emacsclient` compatibility path.
 
 2. **No global live-terminal fanout.** The daemon never scans
    `/dev/pts`, never writes OSC sequences to terminals, and

@@ -35,9 +35,13 @@ use crate::schedule::{Location, SchedulePlan, ScheduledBrightness, ScheduledValu
 use crate::solar_time::SolarClockProjection;
 use crate::state::{
     ReadStoredLocation, ReadStoredState, RecordAppliedWarmth, RecordBrightness, RecordLocation, RecordTheme,
-    RecordWarmth, StateStore, StoredVisualState, StoredWarmthState,
+    RecordWarmth, StateStore, StoredThemeState, StoredVisualState, StoredWarmthState,
 };
 use crate::theme::{ApplyTheme, ThemeApplier, ThemeMode};
+use crate::theme_dbus::{
+    EMACS_CONSUMER, ProjectionError, ProjectionReport, ProjectionStatusRecord, ThemeDbusService, ThemeProjection,
+    ThemeSignalPublisher, ThemeSnapshot,
+};
 use crate::time::RampDuration;
 use crate::warmth::KelvinTemperature;
 use crate::wire::{read_frame, socket_path, write_frame};
@@ -57,6 +61,7 @@ pub async fn run() -> Result<()> {
     let config_file = ConfigFile::from_default_locations()?;
     let config = config_file.config()?;
     let root = ChromaRoot::start(config).await?;
+    let theme_dbus_service = ThemeDbusService::start(root.clone()).await?;
     let config_watcher = ConfigWatcher::start(config_file, root.clone()).await?;
     let sleep_watcher = SleepTransitionWatcher::start(root.clone()).await;
     root.ask(ReapplyCurrentState).await.map_err(|error| Error::ActorCall { message: error.to_string() })?;
@@ -90,6 +95,7 @@ pub async fn run() -> Result<()> {
 
     let _ = config_watcher.stop_gracefully().await;
     let _ = sleep_watcher.stop_gracefully().await;
+    theme_dbus_service.stop().await;
     sleep_watcher.wait_for_shutdown().await;
     config_watcher.wait_for_shutdown().await;
     let _ = root.stop_gracefully().await;
@@ -114,8 +120,11 @@ async fn serve_connection(mut stream: UnixStream, root: &ActorRef<ChromaRoot>) -
     Ok(())
 }
 
-struct ChromaRoot {
+pub(crate) struct ChromaRoot {
     theme: ThemeMode,
+    theme_revision: u64,
+    theme_projection: ThemeProjection,
+    theme_signal_publisher: Option<ThemeSignalPublisher>,
     warmth: Option<StoredWarmthState>,
     warmth_fallback: KelvinTemperature,
     brightness: BrightnessPercent,
@@ -133,6 +142,7 @@ impl ChromaRoot {
 
         let fallback = StoredVisualState {
             theme: config.theme.schedule.default_mode(),
+            theme_state: StoredThemeState::new(config.theme.schedule.default_mode(), 0),
             warmth: None,
             percent: config.brightness.schedule.default_level().percent(),
         };
@@ -150,6 +160,9 @@ impl ChromaRoot {
         let brightness_applier = BrightnessApplier::start(GammaClient::connect().await?).await;
         let reference = Self::spawn(Self {
             theme: stored.theme,
+            theme_revision: stored.theme_state.revision(),
+            theme_projection: ThemeProjection::new(ThemeSnapshot::new(stored.theme, stored.theme_state.revision())),
+            theme_signal_publisher: None,
             warmth: stored.warmth,
             warmth_fallback: config.warmth.schedule.default_level().kelvin(),
             brightness: stored.percent,
@@ -169,9 +182,9 @@ impl ChromaRoot {
         Ok(reference)
     }
 
-    async fn persist_theme(&self, mode: ThemeMode) -> Result<()> {
+    async fn persist_theme(&self, state: StoredThemeState) -> Result<()> {
         self.state_store
-            .ask(RecordTheme { mode })
+            .ask(RecordTheme { state })
             .await
             .map_err(|error| Error::ActorCall { message: error.to_string() })
     }
@@ -206,8 +219,17 @@ impl ChromaRoot {
     }
 
     async fn set_theme(&mut self, mode: ThemeMode) -> Result<Response> {
-        self.theme = mode;
-        self.persist_theme(mode).await?;
+        if mode != self.theme {
+            let revision = self.theme_revision.saturating_add(1);
+            let state = StoredThemeState::new(mode, revision);
+            self.persist_theme(state).await?;
+            self.theme = mode;
+            self.theme_revision = revision;
+            self.theme_projection.replace_desired(ThemeSnapshot::new(mode, revision));
+            if let Some(publisher) = &self.theme_signal_publisher {
+                publisher.publish(ThemeSnapshot::new(mode, revision)).await?;
+            }
+        }
         self.enqueue_theme(mode).await?;
         Ok(Response::Accepted)
     }
@@ -332,7 +354,12 @@ impl ChromaRoot {
             self.warmth = self
                 .state_store
                 .ask(ReadStoredState {
-                    fallback: StoredVisualState { theme: self.theme, warmth: self.warmth, percent: self.brightness },
+                    fallback: StoredVisualState {
+                        theme: self.theme,
+                        theme_state: StoredThemeState::new(self.theme, self.theme_revision),
+                        warmth: self.warmth,
+                        percent: self.brightness,
+                    },
                 })
                 .await
                 .map_err(|error| Error::ActorCall { message: error.to_string() })?
@@ -467,6 +494,107 @@ impl Message<InstallSchedule> for ChromaRoot {
     async fn handle(&mut self, message: InstallSchedule, _context: &mut Context<Self, Self::Reply>) -> Self::Reply {
         self.schedule_engine = Some(message.schedule_engine);
         Ok(())
+    }
+}
+
+pub(crate) struct InstallThemeSignalPublisher {
+    pub(crate) publisher: ThemeSignalPublisher,
+}
+
+impl Message<InstallThemeSignalPublisher> for ChromaRoot {
+    type Reply = Result<()>;
+
+    async fn handle(
+        &mut self,
+        message: InstallThemeSignalPublisher,
+        _context: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.theme_signal_publisher = Some(message.publisher);
+        Ok(())
+    }
+}
+
+pub(crate) struct RegisterThemeConsumer {
+    pub(crate) consumer: String,
+    pub(crate) sender: String,
+}
+
+impl Message<RegisterThemeConsumer> for ChromaRoot {
+    type Reply = std::result::Result<ThemeSnapshot, ProjectionError>;
+
+    async fn handle(
+        &mut self,
+        message: RegisterThemeConsumer,
+        _context: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.theme_projection.register(&message.consumer, &message.sender)
+    }
+}
+
+pub(crate) struct ReportThemeProjection {
+    pub(crate) consumer: String,
+    pub(crate) sender: String,
+    pub(crate) revision: u64,
+    pub(crate) result: String,
+    pub(crate) code: String,
+    pub(crate) summary: String,
+}
+
+impl ReportThemeProjection {
+    fn report(&self) -> std::result::Result<ProjectionReport, ProjectionError> {
+        if self.result == "Applied" && self.code.is_empty() && self.summary.is_empty() {
+            return Ok(ProjectionReport::applied(self.revision));
+        }
+        if self.result == "Failed" {
+            return Ok(ProjectionReport::failed(self.revision, &self.code, &self.summary));
+        }
+        Err(ProjectionError::InvalidFailureCode)
+    }
+}
+
+impl Message<ReportThemeProjection> for ChromaRoot {
+    type Reply = std::result::Result<(), ProjectionError>;
+
+    async fn handle(
+        &mut self,
+        message: ReportThemeProjection,
+        _context: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if message.consumer != EMACS_CONSUMER {
+            return Err(ProjectionError::UnsupportedConsumer);
+        }
+        self.theme_projection.report(&message.sender, message.report()?)
+    }
+}
+
+pub(crate) struct QueryProjectionStatus {
+    pub(crate) consumer: String,
+}
+
+impl Message<QueryProjectionStatus> for ChromaRoot {
+    type Reply = std::result::Result<ProjectionStatusRecord, ProjectionError>;
+
+    async fn handle(
+        &mut self,
+        message: QueryProjectionStatus,
+        _context: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if message.consumer != EMACS_CONSUMER {
+            return Err(ProjectionError::UnsupportedConsumer);
+        }
+        Ok(self.theme_projection.status_record())
+    }
+}
+
+pub(crate) struct ProjectionOwnerDisappeared {
+    pub(crate) sender: String,
+}
+
+impl Message<ProjectionOwnerDisappeared> for ChromaRoot {
+    type Reply = ();
+
+    async fn handle(&mut self, message: ProjectionOwnerDisappeared, _context: &mut Context<Self, Self::Reply>) {
+        self.theme_projection.owner_disappeared(&message.sender);
     }
 }
 
