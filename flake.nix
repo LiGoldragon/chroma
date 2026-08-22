@@ -75,6 +75,11 @@
         checks.default = craneLib.cargoTest (commonArgs // {
           inherit cargoArtifacts;
         });
+        checks.session-dbus = craneLib.cargoTest (commonArgs // {
+          inherit cargoArtifacts;
+          nativeBuildInputs = [ pkgs.dbus ];
+          cargoTestCommand = "dbus-run-session -- cargo test --lib actual_theme_dbus_service_binds_the_real_protocol_to_unique_bus_owners -- --ignored";
+        });
         checks.sandbox-terminal = pkgs.runCommand "chroma-sandbox-terminal-check"
           {
             nativeBuildInputs = [

@@ -138,6 +138,13 @@ pub(crate) struct ChromaRoot {
 impl ChromaRoot {
     async fn start(config: Config) -> Result<ActorRef<Self>> {
         let state_store = StateStore::start_default()?;
+        Self::start_with_state_store(config, state_store).await
+    }
+
+    pub(crate) async fn start_with_state_store(
+        config: Config,
+        state_store: ActorRef<StateStore>,
+    ) -> Result<ActorRef<Self>> {
         state_store.wait_for_startup().await;
 
         let fallback = StoredVisualState {
@@ -219,8 +226,10 @@ impl ChromaRoot {
     }
 
     async fn set_theme(&mut self, mode: ThemeMode) -> Result<Response> {
-        if mode != self.theme {
-            let revision = self.theme_revision.saturating_add(1);
+        if let Some(revision) = next_theme_revision(self.theme_revision, mode != self.theme)? {
+            // Refuse before persistence, native application, or signal
+            // publication. Reusing `u64::MAX` would make two different
+            // desired snapshots indistinguishable on the public bus.
             let state = StoredThemeState::new(mode, revision);
             self.persist_theme(state).await?;
             self.theme = mode;
@@ -416,6 +425,28 @@ impl ChromaRoot {
             let _ = previous_schedule_engine.stop_gracefully().await;
         }
         Ok(())
+    }
+}
+
+/// Decide the next persisted revision before any change side effect starts.
+/// `None` preserves the duplicate-mode no-op, while exhaustion rejects a real
+/// mode change without yielding a duplicate revision.
+fn next_theme_revision(current: u64, mode_changed: bool) -> Result<Option<u64>> {
+    if !mode_changed {
+        return Ok(None);
+    }
+    current.checked_add(1).map(Some).ok_or(Error::ThemeRevisionExhausted)
+}
+
+#[cfg(test)]
+mod revision_tests {
+    use super::next_theme_revision;
+    use crate::error::Error;
+
+    #[test]
+    fn a_real_theme_change_at_the_revision_limit_has_no_revision_to_persist_publish_or_apply() {
+        assert!(matches!(next_theme_revision(u64::MAX, true), Err(Error::ThemeRevisionExhausted)));
+        assert_eq!(next_theme_revision(u64::MAX, false).expect("same mode remains a no-op"), None);
     }
 }
 

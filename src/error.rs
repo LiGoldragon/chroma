@@ -96,6 +96,10 @@ pub enum Error {
     #[error("daemon: {message}")]
     Daemon { message: String },
 
+    /// A changed theme cannot receive a new monotonic D-Bus revision.
+    #[error("theme revision space is exhausted")]
+    ThemeRevisionExhausted,
+
     /// A native theme concern failed while applying a mode.
     #[error("theme concern {concern} failed for {mode}: {message}")]
     ThemeConcern { concern: String, mode: String, message: String },

@@ -31,6 +31,41 @@ fn current_acknowledgements_are_idempotent_and_stale_reports_never_regress_statu
 }
 
 #[test]
+fn stale_failure_reports_must_still_use_the_bounded_public_vocabulary() {
+    let mut projection = ThemeProjection::new(snapshot(ThemeMode::Light, 3));
+    projection.register("emacs", ":1.14").expect("register");
+    projection.report(":1.14", ProjectionReport::applied(3)).expect("apply current");
+
+    assert!(
+        projection.report(":1.14", ProjectionReport::failed(2, "not-allowlisted", "old failure")).is_err(),
+        "a stale report must not bypass failure-code validation"
+    );
+    assert!(
+        projection.report(":1.14", ProjectionReport::failed(2, "load-failed", "x".repeat(241))).is_err(),
+        "a stale report must not bypass the bounded-summary validation"
+    );
+    projection
+        .report(":1.14", ProjectionReport::failed(2, "load-failed", "valid but stale"))
+        .expect("a valid stale report is a typed no-op");
+    assert_eq!(projection.status(), ProjectionStatus::Applied { revision: 3 });
+}
+
+#[test]
+fn duplicate_current_reports_reconcile_status_in_both_directions() {
+    let mut projection = ThemeProjection::new(snapshot(ThemeMode::Dark, 8));
+    projection.register("emacs", ":1.15").expect("register");
+
+    projection.report(":1.15", ProjectionReport::applied(8)).expect("apply current");
+    projection
+        .report(":1.15", ProjectionReport::failed(8, "application-failed", "postcondition later failed"))
+        .expect("same-current failure reconciles applied state");
+    assert_eq!(projection.status(), ProjectionStatus::Failed { revision: 8 });
+
+    projection.report(":1.15", ProjectionReport::applied(8)).expect("same-current success reconciles failed state");
+    assert_eq!(projection.status(), ProjectionStatus::Applied { revision: 8 });
+}
+
+#[test]
 fn desired_change_enters_pending_and_accepts_only_the_plugin_failure_vocabulary() {
     let mut projection = ThemeProjection::new(snapshot(ThemeMode::Dark, 0));
     projection.register("emacs", ":1.13").expect("register");

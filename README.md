@@ -36,11 +36,20 @@ bus, at `/io/github/LiGoldragon/Chroma/Theme`, interface
 - `ReportProjection("emacs", revision, "Applied"|"Failed", code, summary)` has a fixed signature; `Applied` carries empty `code` and `summary`. Failed codes are `configuration`, `load-failed`, `verification-failed`, or `application-failed`; summaries are at most 240 UTF-8 bytes.
 - `GetProjectionStatus("emacs") -> (status, revision)` exposes `Unavailable`, `Pending`, `Applied`, or `Failed`.
 
+Reports for the current revision reconcile the postcondition in either
+direction: a later `Failed` may replace `Applied`, and a later `Applied` may
+replace `Failed`. Stale reports remain no-ops only after their failure payload
+passes the same finite code and 240-byte summary bounds as a current report.
+
 The desired `{ThemeMode, revision}` snapshot is atomically persisted. A
 theme-only legacy archive migrates once to revision zero. Sender liveness and
 acknowledgement status are intentionally transient, beginning `Unavailable`
 after a Chroma restart. This is an inspection surface, not a claim that this
 wire is permanent.
+
+The private daemon witness runs on a fresh session bus:
+`dbus-run-session -- cargo test --lib actual_theme_dbus_service_binds_the_real_protocol_to_unique_bus_owners -- --ignored`.
+Nix exposes the same witness as `checks.session-dbus`.
 
 The daemon is named for what it manages — *chroma*, the colour
 state of the display. It applies the existing **Ignis** colour

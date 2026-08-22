@@ -209,13 +209,16 @@ impl ThemeProjection {
         if self.owner.as_deref() != Some(sender) {
             return Err(ProjectionError::SenderDoesNotOwnConsumer);
         }
+        // The public failure fields are bounded input regardless of revision.
+        // A stale report is a no-op only after it has proved it belongs to this
+        // protocol's finite vocabulary and byte budget.
+        report.validate()?;
         if report.revision() < self.snapshot.revision() {
             return Ok(());
         }
         if report.revision() > self.snapshot.revision() {
             return Err(ProjectionError::FutureRevision);
         }
-        report.validate()?;
         self.status = match report {
             ProjectionReport::Applied { revision } => ProjectionStatus::Applied { revision },
             ProjectionReport::Failed { revision, .. } => ProjectionStatus::Failed { revision },
@@ -233,6 +236,13 @@ impl ThemeProjection {
     pub const fn status_record(&self) -> ProjectionStatusRecord {
         ProjectionStatusRecord::new(self.snapshot, self.status)
     }
+}
+
+/// A `NameOwnerChanged` removal proves a consumer disappeared only when the
+/// changed name is that consumer's unique bus name. Releasing a well-known
+/// name also carries its old unique owner, but leaves that connection alive.
+fn unique_owner_disappeared(name: &str, old_owner: &str, new_owner: &str) -> bool {
+    new_owner.is_empty() && name.starts_with(':') && name == old_owner
 }
 
 /// Signal sender retained by the root after it has exported the interface.
@@ -385,6 +395,156 @@ impl Actor for ThemeOwnerWatcher {
     }
 }
 
+#[cfg(test)]
+mod owner_watcher_tests {
+    use super::unique_owner_disappeared;
+
+    #[test]
+    fn releasing_an_unrelated_well_known_name_is_not_consumer_owner_loss() {
+        assert!(!unique_owner_disappeared("org.example.Unrelated", ":1.42", ""));
+        assert!(unique_owner_disappeared(":1.42", ":1.42", ""));
+    }
+}
+
+/// Private integration witness. It is deliberately ignored in ordinary cargo
+/// runs and has no missing-bus escape: the durable Nix check and the explicit
+/// command run it inside `dbus-run-session`.
+#[cfg(test)]
+mod private_session_bus_tests {
+    use super::*;
+    use crate::brightness::{BrightnessAxis, BrightnessLevel, BrightnessSchedule};
+    use crate::config::Config;
+    use crate::daemon::ChromaRoot;
+    use crate::state::StateStore;
+    use crate::theme::{ThemeAdapters, ThemeAxis, ThemePalette, ThemePalettes, ThemeSchedule};
+    use crate::warmth::{WarmthAxis, WarmthLevel, WarmthSchedule};
+    use futures_util::StreamExt;
+    use kameo::actor::Spawn;
+    use zbus::Connection;
+
+    struct FakeGamma;
+
+    #[zbus::interface(name = "rs.wl.gammarelay")]
+    impl FakeGamma {
+        #[zbus(property)]
+        fn temperature(&self) -> u16 {
+            6_500
+        }
+
+        #[zbus(property)]
+        fn brightness(&self) -> f64 {
+            1.0
+        }
+    }
+
+    fn palette() -> ThemePalette {
+        ThemePalette::from_base16_slots(["#000000"; 16])
+    }
+
+    fn config() -> Config {
+        Config {
+            theme: ThemeAxis {
+                concerns: vec![],
+                palettes: ThemePalettes { dark: palette(), light: palette() },
+                adapters: ThemeAdapters::default(),
+                font_point_size: 12,
+                ghostty_config_templates: None,
+                pi_theme_control: None,
+                schedule: ThemeSchedule::Manual(ThemeMode::Dark),
+            },
+            warmth: WarmthAxis { schedule: WarmthSchedule::Manual(WarmthLevel::Neutral) },
+            brightness: BrightnessAxis { schedule: BrightnessSchedule::Manual(BrightnessLevel::Bright) },
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "run under dbus-run-session; this is the private durable bus witness"]
+    async fn actual_theme_dbus_service_binds_the_real_protocol_to_unique_bus_owners() {
+        let gamma = Connection::session().await.expect("private bus is required");
+        gamma.request_name("rs.wl-gammarelay").await.expect("own fake gamma name");
+        gamma.object_server().at("/", FakeGamma).await.expect("export fake gamma");
+
+        let directory = tempfile::tempdir().expect("temporary redb directory");
+        let state =
+            StateStore::spawn_in_thread(StateStore::open(directory.path().join("state.redb")).expect("open redb"));
+        state.wait_for_startup().await;
+        let root = ChromaRoot::start_with_state_store(config(), state).await.expect("start actual chroma root");
+        let service = ThemeDbusService::start(root.clone()).await.expect("register actual Chroma service");
+
+        let client = Connection::session().await.expect("connect first client");
+        let proxy = zbus::Proxy::new(&client, THEME_SERVICE, THEME_OBJECT_PATH, THEME_INTERFACE)
+            .await
+            .expect("build real protocol proxy");
+        let registered: (String, u64) =
+            proxy.call("RegisterConsumer", &(EMACS_CONSUMER,)).await.expect("register consumer");
+        assert_eq!(registered, ("Dark".to_owned(), 0));
+        let status: (String, u64) = proxy.call("GetProjectionStatus", &(EMACS_CONSUMER,)).await.expect("query status");
+        assert_eq!(status, ("Pending".to_owned(), 0));
+
+        let second = Connection::session().await.expect("connect second client");
+        let second_proxy = zbus::Proxy::new(&second, THEME_SERVICE, THEME_OBJECT_PATH, THEME_INTERFACE)
+            .await
+            .expect("build second proxy");
+        assert!(second_proxy.call::<_, _, ()>("RegisterConsumer", &(EMACS_CONSUMER,)).await.is_err());
+        client.request_name("io.github.LiGoldragon.Chroma.TestConsumer").await.expect("own unrelated name");
+        client.release_name("io.github.LiGoldragon.Chroma.TestConsumer").await.expect("release unrelated name");
+        tokio::task::yield_now().await;
+        let status: (String, u64) = second_proxy
+            .call("GetProjectionStatus", &(EMACS_CONSUMER,))
+            .await
+            .expect("query after unrelated-name release");
+        assert_eq!(status, ("Pending".to_owned(), 0));
+        assert!(
+            proxy.call::<_, _, ()>("ReportProjection", &(EMACS_CONSUMER, 0_u64, "Failed", "wrong", "x")).await.is_err()
+        );
+        proxy
+            .call::<_, _, ()>("ReportProjection", &(EMACS_CONSUMER, 0_u64, "Applied", "", ""))
+            .await
+            .expect("fixed five-argument applied report");
+
+        let mut signals = proxy.receive_signal("DesiredStateChanged").await.expect("subscribe full snapshot signal");
+        let emitter = SignalEmitter::new(&service._connection, THEME_OBJECT_PATH).expect("service emitter");
+        ThemeDbusInterface::desired_state_changed(emitter, "Light", 1).await.expect("emit full snapshot signal");
+        let body: (String, u64) =
+            signals.next().await.expect("receive signal").body().deserialize().expect("decode signal");
+        assert_eq!(body, ("Light".to_owned(), 1));
+        drop(signals);
+
+        let bus = zbus::Proxy::new(&second, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus")
+            .await
+            .expect("connect bus owner observer");
+        let mut owner_changes = bus.receive_signal("NameOwnerChanged").await.expect("observe owner loss");
+        drop(proxy);
+        drop(client);
+        let changed = owner_changes.next().await.expect("observe a name-owner change");
+        let (name, old_owner, new_owner): (String, String, String) =
+            changed.body().deserialize().expect("decode owner change");
+        assert!(
+            unique_owner_disappeared(&name, &old_owner, &new_owner),
+            "client connection vanished by its unique name"
+        );
+        let mut status: (String, u64) = ("Applied".to_owned(), 0);
+        for _ in 0..32 {
+            status = second_proxy
+                .call("GetProjectionStatus", &(EMACS_CONSUMER,))
+                .await
+                .expect("query after unique owner loss");
+            if status.0 == "Unavailable" {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(status, ("Unavailable".to_owned(), 0));
+
+        service.stop().await;
+        let restarted = ThemeDbusService::start(root).await.expect("restart actual Chroma service");
+        let status: (String, u64) =
+            second_proxy.call("GetProjectionStatus", &(EMACS_CONSUMER,)).await.expect("query after service restart");
+        assert_eq!(status, ("Unavailable".to_owned(), 0));
+        restarted.stop().await;
+    }
+}
+
 struct BeginWatchingOwners;
 
 impl Message<BeginWatchingOwners> for ThemeOwnerWatcher {
@@ -398,10 +558,10 @@ impl Message<BeginWatchingOwners> for ThemeOwnerWatcher {
         let _ = context.spawn(async move {
             while let Some(message) = signals.next().await {
                 // Foreign D-Bus wire body: NameOwnerChanged(name, old-owner, new-owner).
-                let Ok((_name, old_owner, new_owner)) = message.body().deserialize::<(String, String, String)>() else {
+                let Ok((name, old_owner, new_owner)) = message.body().deserialize::<(String, String, String)>() else {
                     continue;
                 };
-                if !old_owner.is_empty() && new_owner.is_empty() {
+                if unique_owner_disappeared(&name, &old_owner, &new_owner) {
                     let _ = root.tell(ProjectionOwnerDisappeared { sender: old_owner }).await;
                 }
             }
