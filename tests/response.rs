@@ -1,47 +1,32 @@
-//! Round-trip tests for the [`chroma::Response`] enum.
+//! Generated Datom reply boundary and runtime-only rkyv frame tests.
 
 use chroma::Response;
+use datomic::Datomic;
 
 #[test]
-fn accepted_response_uses_human_readable_dotos_word() {
-    let response = Response::Accepted;
-
-    let rendered = response.to_dotos().expect("dotos encode");
-    assert_eq!(rendered, "Accepted");
-    assert_eq!(Response::from_dotos(&rendered).expect("dotos decode"), response);
+fn accepted_reply_is_generated_datom() {
+    let reply = chroma::generated::Reply::try_from(Response::Accepted).expect("render reply");
+    assert_eq!(reply.textualize().as_ref(), "Accepted");
 }
 
 #[test]
-fn accepted_response_round_trips_through_rkyv_wire_format() {
-    let response = Response::Accepted;
-    let bytes = response.archive().expect("archive");
-
-    assert_eq!(Response::from_archive(&bytes).expect("from_archive"), response);
-}
-
-#[test]
-fn solar_clock_response_preserves_positional_wire_while_naming_equation_validity() {
+fn solar_clock_reply_is_named_and_positional_in_its_generated_anatomy() {
     let response =
         Response::SolarClock { utc_offset_seconds: -854, equation_of_time_valid_until_unix_seconds: 1_736_208_000 };
-    let rendered = response.to_dotos().expect("dotos encode");
-
-    assert_eq!(rendered, "SolarClock.(-854 1736208000)");
-    assert_eq!(Response::from_dotos(&rendered).expect("dotos decode"), response);
+    let reply = chroma::generated::Reply::try_from(response.clone()).expect("render reply");
+    assert_eq!(reply.textualize().as_ref(), "SolarClock.{-854 1736208000}");
     assert_eq!(Response::from_archive(&response.archive().expect("archive")).expect("decode"), response);
 }
 
 #[test]
-fn unavailable_solar_clock_round_trips_explicitly() {
-    let response = Response::SolarClockUnavailable;
-    assert_eq!(response.to_dotos().expect("dotos encode"), "SolarClockUnavailable");
-    assert_eq!(Response::from_dotos("SolarClockUnavailable").expect("dotos decode"), response);
+fn unavailable_solar_clock_is_explicit() {
+    let reply = chroma::generated::Reply::try_from(Response::SolarClockUnavailable).expect("render reply");
+    assert_eq!(reply.textualize().as_ref(), "SolarClockUnavailable");
 }
 
 #[test]
-fn error_messages_with_apostrophes_do_not_require_quote_delimiters() {
-    let response = Response::Error { message: "theme's palette is missing".into() };
-
-    let rendered = response.to_dotos().expect("dotos encode");
-    assert_eq!(rendered, "Error.((theme's palette is missing))");
-    assert_eq!(Response::from_dotos(&rendered).expect("dotos decode"), response);
+fn reply_strings_use_datom_quotes() {
+    let reply = chroma::generated::Reply::try_from(Response::Error { message: "theme's palette is missing".into() })
+        .expect("render reply");
+    assert_eq!(reply.textualize().as_ref(), "Error.{“theme's palette is missing”}");
 }

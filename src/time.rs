@@ -10,13 +10,12 @@ use core::fmt;
 use core::time::Duration;
 
 use crate::error::{Error, Result};
-use dotos::{Block, Delimiter, DotosBlock, DotosDecode, DotosDecodeError, DotosEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 /// A positive duration over which a ramped axis interpolates.
 ///
 /// Stored as whole seconds (`u64`) so it round-trips cleanly
-/// through both rkyv (the wire) and DOTOS (the CLI argv).
+/// through both rkyv (the local socket frame) and Datom (the human boundary).
 /// Construction clamps to ≥ 1 second so the lerp denominator
 /// is never zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, RkyvSerialize, RkyvDeserialize)]
@@ -57,50 +56,6 @@ impl fmt::Display for RampDuration {
             if seconds == 0 { write!(formatter, "{minutes}m") } else { write!(formatter, "{minutes}m{seconds}s") }
         } else {
             write!(formatter, "{total}s")
-        }
-    }
-}
-
-// DOTOS wire form: `Minutes.(<n>)` or `Seconds.(<n>)`. Encoded
-// in whichever form fits cleanly: if the duration is a whole
-// number of minutes, emit `Minutes.(<n>)`; otherwise emit
-// `Seconds.(<n>)`. Decode accepts either.
-impl DotosEncode for RampDuration {
-    fn to_dotos(&self) -> String {
-        if self.0.is_multiple_of(60) {
-            format!("Minutes.{}", Delimiter::Parenthesis.wrap([(self.0 / 60).to_string()]))
-        } else {
-            format!("Seconds.{}", Delimiter::Parenthesis.wrap([self.0.to_string()]))
-        }
-    }
-}
-
-impl DotosDecode for RampDuration {
-    fn from_dotos_block(block: &Block) -> std::result::Result<Self, DotosDecodeError> {
-        let (head, payload) = block.as_application().ok_or(DotosDecodeError::ExpectedDelimited {
-            type_name: "RampDuration",
-            delimiter: "RampDuration.(payload) application",
-        })?;
-        let children = DotosBlock::new(payload).expect_delimited(Delimiter::Parenthesis, "RampDuration")?;
-        if children.len() != 1 {
-            return Err(DotosDecodeError::ExpectedRootCount {
-                type_name: "RampDuration",
-                expected: 1,
-                found: children.len(),
-            });
-        }
-        let head =
-            head.demote_to_string().ok_or(DotosDecodeError::ExpectedAtom { type_name: "RampDuration variant" })?;
-        match head {
-            "Minutes" => {
-                let minutes = DotosBlock::new(&children[0]).parse_integer()?;
-                Ok(Self::from_seconds(minutes.saturating_mul(60)))
-            }
-            "Seconds" => {
-                let seconds = DotosBlock::new(&children[0]).parse_integer()?;
-                Ok(Self::from_seconds(seconds))
-            }
-            other => Err(DotosDecodeError::UnknownVariant { enum_name: "RampDuration", variant: other.to_string() }),
         }
     }
 }
@@ -172,7 +127,7 @@ pub enum RelativeSolarOffset {
 }
 
 impl RelativeSolarOffset {
-    /// Decode the DOTOS label used in the Chroma config.
+    /// Decode the legacy named relative-solar offset.
     pub fn from_config_name(name: &str) -> Result<Self> {
         match name {
             "ExtremelyEarly" => Ok(Self::ExtremelyEarly),

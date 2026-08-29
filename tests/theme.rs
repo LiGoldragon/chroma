@@ -2,7 +2,6 @@ use chroma::{
     ApplyTheme, GhosttyConfigChange, GhosttyConfigFile, PiThemeControl, ThemeAdapters, ThemeApplier, ThemeAxis,
     ThemeConcern, ThemeMode, ThemePalette, ThemePalettes, ThemeSchedule,
 };
-use dotos::{DotosDecode, DotosEncode, DotosSource};
 use kameo::actor::ActorRef;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -10,14 +9,6 @@ use std::path::{Path, PathBuf};
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixListener;
 use tokio::time::{Duration, timeout};
-
-fn round_trip_dotos<T>(value: &T) -> T
-where
-    T: DotosEncode + DotosDecode + Clone,
-{
-    let text = value.to_dotos();
-    DotosSource::new(&text).parse().expect("decode")
-}
 
 struct ThemeApplierFixture {
     temporary_directory: tempfile::TempDir,
@@ -91,25 +82,6 @@ fn toggled_inverts() {
 fn toggled_twice_is_identity() {
     assert_eq!(ThemeMode::Dark.toggled().toggled(), ThemeMode::Dark);
     assert_eq!(ThemeMode::Light.toggled().toggled(), ThemeMode::Light);
-}
-
-#[test]
-fn dotos_round_trip_dark() {
-    assert_eq!(round_trip_dotos(&ThemeMode::Dark), ThemeMode::Dark);
-}
-
-#[test]
-fn dotos_round_trip_light() {
-    assert_eq!(round_trip_dotos(&ThemeMode::Light), ThemeMode::Light);
-}
-
-#[test]
-fn dotos_encodes_as_pascal_variant_name() {
-    let text = ThemeMode::Dark.to_dotos();
-    assert_eq!(text, "Dark");
-
-    let text = ThemeMode::Light.to_dotos();
-    assert_eq!(text, "Light");
 }
 
 #[tokio::test]

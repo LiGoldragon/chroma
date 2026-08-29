@@ -1,5 +1,5 @@
 //! chroma — one Rust daemon for theme, warmth, and brightness,
-//! controlled via DOTOS.
+//! controlled via Datom.
 //!
 //! Per the design report at
 //! `~/primary/reports/system-specialist/28-chroma-unified-visual-daemon.md`:
@@ -17,6 +17,7 @@ pub mod config;
 pub mod daemon;
 pub mod error;
 pub mod gamma;
+pub mod generated;
 pub mod geoclue;
 pub mod request;
 pub mod response;

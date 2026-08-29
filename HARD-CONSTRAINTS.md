@@ -20,12 +20,12 @@ Tests:
 - `hc_chroma_002_apply_targets_records_are_rejected_not_migrated`
 - `hc_chroma_003_legacy_theme_concern_is_rejected_not_retained`
 
-## HC-CHROMA-003 — DOTOS-Only Data Inputs
+## HC-CHROMA-003 — Datom-Only Data Inputs
 
-Configuration and palette data inputs are DOTOS. YAML/YML inputs
+Configuration and palette data inputs are Datom. YAML/YML inputs
 are invalid at the Chroma boundary.
 
-Test: `hc_chroma_004_yaml_data_inputs_are_rejected_in_favor_of_dotos`.
+Test: `legacy_and_yaml_are_not_chroma_config_anatomies`.
 
 ## HC-CHROMA-004 — No Global Live-Terminal Fanout
 

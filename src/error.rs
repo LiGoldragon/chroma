@@ -11,10 +11,6 @@ use thiserror::Error as ThisError;
 /// The crate's error type.
 #[derive(Debug, ThisError)]
 pub enum Error {
-    /// Failed to parse a DOTOS document at the CLI or config boundary.
-    #[error("dotos parse failed: {0}")]
-    DotosParse(#[from] dotos::DotosDecodeError),
-
     /// Failed to encode or decode an rkyv archive on the wire.
     #[error("rkyv codec failed: {0}")]
     RkyvCodec(String),

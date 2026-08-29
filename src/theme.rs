@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration as StandardDuration;
 
-use dotos::{DotosDecode, DotosEncode};
 use kameo::actor::{Actor, ActorRef, Spawn, WeakActorRef};
 use kameo::error::{ActorStopReason, Infallible};
 use kameo::message::{Context, Message};
@@ -26,9 +25,7 @@ use crate::error::{Error, Result};
 use crate::time::RampTrigger;
 
 /// The active colour scheme.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, DotosDecode, DotosEncode, Archive, RkyvSerialize, RkyvDeserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum ThemeMode {
     Dark,
     Light,
@@ -234,13 +231,13 @@ impl PiThemeControlRegistryEntry {
     }
 
     async fn remove_registration(&self) {
-        if let Err(error) = tokio::fs::remove_file(&self.entry_path).await {
-            if error.kind() != ErrorKind::NotFound {
-                eprintln!(
-                    "chroma-daemon Pi theme control could not remove stale registry entry {}: {error}",
-                    self.entry_path.display()
-                );
-            }
+        if let Err(error) = tokio::fs::remove_file(&self.entry_path).await
+            && error.kind() != ErrorKind::NotFound
+        {
+            eprintln!(
+                "chroma-daemon Pi theme control could not remove stale registry entry {}: {error}",
+                self.entry_path.display()
+            );
         }
     }
 
@@ -468,7 +465,7 @@ impl ThemePalette {
     }
 }
 
-/// Dark and light palettes read from DOTOS config.
+/// Dark and light palettes read from Datom config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemePalettes {
     pub dark: ThemePalette,

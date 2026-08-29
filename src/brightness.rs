@@ -11,16 +11,13 @@
 
 use core::fmt;
 
-use dotos::{Block, DotosBlock, DotosDecode, DotosDecodeError, DotosEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::error::{Error, Result};
 use crate::time::{RampDuration, RampTrigger};
 
 /// A discrete brightness level on the daemon's standard ladder.
-#[derive(
-    Debug, Default, Clone, Copy, PartialEq, Eq, Hash, DotosDecode, DotosEncode, Archive, RkyvSerialize, RkyvDeserialize,
-)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum BrightnessLevel {
     Dim,
     Dimmer,
@@ -91,8 +88,7 @@ impl fmt::Display for BrightnessLevel {
 ///
 /// wl-gammarelay-rs's `Brightness` DBus property is a `d`
 /// (double) in `[0.0, 1.0]`; convert with [`Self::as_fraction`].
-/// All construction paths — including [`DotosDecode`] — clamp to
-/// `[MIN, MAX]` = `[0, 100]`.
+/// Construction clamps to `[MIN, MAX]` = `[0, 100]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct BrightnessPercent(u8);
 
@@ -145,21 +141,6 @@ impl BrightnessPercent {
 impl fmt::Display for BrightnessPercent {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}%", self.0)
-    }
-}
-
-// Hand-written DOTOS codec — routes decode through `new` so
-// out-of-range values clamp consistently.
-impl DotosEncode for BrightnessPercent {
-    fn to_dotos(&self) -> String {
-        self.0.to_string()
-    }
-}
-
-impl DotosDecode for BrightnessPercent {
-    fn from_dotos_block(block: &Block) -> std::result::Result<Self, DotosDecodeError> {
-        let raw = DotosBlock::new(block).parse_u16()?;
-        Ok(Self::new(raw.min(u16::from(u8::MAX)) as u8))
     }
 }
 

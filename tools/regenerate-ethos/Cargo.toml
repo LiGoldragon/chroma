@@ -1,0 +1,8 @@
+[package]
+name = "chroma-regenerate-ethos"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+ethos-zero = { git = "https://github.com/LiGoldragon/ethos-zero", rev = "b922afba278d5e1430f0a52ce49898c3263e87bc" }

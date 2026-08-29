@@ -29,7 +29,7 @@ Chroma owns:
 - the persisted current value per axis (in redb + rkyv)
 - the typed CLI request grammar (`Request` / `Response`)
 - the IPC contract between CLI and daemon (rkyv-on-UDS)
-- the configuration and palette grammar (`Config`, DOTOS on disk)
+- the schema-authored configuration and palette grammar (`Config`, Datom on disk)
 - the bounded geoclue2 system-bus location read when twilight
   triggers are used
 - the orchestration of ramps (start, interrupt, replace)
@@ -43,7 +43,7 @@ Chroma does **not** own:
   daemon that talks to the wlroots compositor; chroma is its
   sole consumer
 - the colour palette's authorship — Ignis is the palette;
-  chroma reads it as DOTOS data and applies it, but does not
+  chroma reads it as Datom data and applies it, but does not
   generate, edit, or version the palette
 - the geolocation source — geoclue2 is the upstream authority;
   chroma reads it directly on the system bus but does not bypass,
@@ -131,46 +131,31 @@ Daemon ↔ CLI is the **signal pattern** documented in
   `Error(Error)`)
 - Pairing: by position on the connection (FIFO)
 
-The CLI binary is a thin signal client: parse DOTOS argv into a
-typed request → archive with rkyv → length-prefix → send → read
-reply → bytecheck-validate → print as DOTOS. Every mutating
+The CLI binary is a thin signal client: embody generated Datom argv →
+runtime-validate → archive with rkyv → length-prefix → send → read
+reply → bytecheck-validate → convert to a generated reply → print as Datom. Every mutating
 request returns `Accepted` after the daemon accepts ownership
 of the change; theme scripts, instant gamma writes, and ramp
 setup/read work continue asynchronously.
 
 ## Configuration
 
-Single DOTOS record at `~/.config/chroma/config.dotos`. Re-parsed
-on inotify push. Parses into a typed `Config`:
+Single Datom record at `~/.config/chroma/config.datom`. Re-parsed
+on inotify push. `chroma.ethos` generates its data anatomy; the
+runtime validates that generated value into typed `Config`:
 
 ```
-(Config
-  (Theme
-    (Concerns Terminal Desktop Ghostty Pi)
-    (Palettes
-      (Dark  (Base00 [#000000]) ... (Base0F [#ff5577]))
-      (Light (Base00 [#faf5f0]) ... (Base0F [#cc3355])))
-    (Adapters (Dconf <path>))
-    (GhosttyConfigTemplates
-      (Dark <path-to-complete-dark-ghostty-config>)
-      (Light <path-to-complete-light-ghostty-config>))
-    (PiThemeControl
-      (RegistryDirectory (RuntimeRelative chroma/pi-live-theme.d))
-      (ConnectTimeoutMillis 100)
-      (WriteTimeoutMillis 100))
-    (Schedule …))
-  (Warmth      (Schedule …))
-  (Brightness  (Schedule …)))
+{{[Terminal Desktop] {{#000000 … #ff5577} {#faf5f0 … #cc3355}}
+  Some.“/run/current-system/sw/bin/dconf” None None None
+  Scheduled.{{Sunrise.-30 Light} {Sunset.30 Dark} Dark}}
+ {Scheduled.{{TimeOfDay.{7 0} Neutral Minutes.30} Neutral}}
+ {Manual.Bright}}
 ```
 
-Each axis schedule is a list of `Waypoint` records + a `Default`.
-Solar triggers: `(Sunrise <offset>)`, `(Sunset <offset>)`,
-`(CivilDawn <offset>)`, `(CivilDusk <offset>)`. The `<offset>`
-is either exact `(SignedMinutes <n>)` or a readable label:
-`ExtremelyEarly`, `VeryEarly`, `Early`, `OnTime`, `Late`,
-`VeryLate`, `ExtremelyLate`. Early means before the named solar
-event; late means after it. Clock triggers remain
-`(TimeOfDay <h> <m>)`. The geoclue read runs iff any axis uses a
+Each schedule is `Manual.<level>` or `Scheduled.{<waypoints> <default>}`.
+Solar triggers are `Sunrise.<signed-minutes>`, `Sunset.<signed-minutes>`,
+`CivilDawn.<signed-minutes>`, and `CivilDusk.<signed-minutes>`; wall-clock
+triggers are `TimeOfDay.{hour minute}`. The geoclue read runs iff any axis uses a
 solar trigger; if geolocation is unavailable, the schedule actor
 retries on a bounded delayed message instead of running a polling
 loop.
@@ -193,7 +178,7 @@ do not rewrite theme files, reload applications, restart ramps, or repeat gamma
 writes when the projection is unchanged. Each schedule reconciliation increments
 a generation counter so stale delayed messages from before suspend or config
 reload cannot keep an old deadline chain alive.
-Data-format inputs at the Chroma boundary are DOTOS; YAML and YML
+Data-format inputs at the Chroma boundary are Datom; YAML and YML
 inputs are rejected. `GhosttyConfigTemplates` paths are references
 to complete Ghostty-native config files produced by the host
 profile; Chroma does not parse them as palette data and does not
@@ -232,17 +217,17 @@ boot hard-fails on mismatch.
 | In-process: actor ↔ actor | typed Rust values |
 | Daemon ↔ CLI | rkyv-archived `Request` / `Response`, length-prefixed |
 | Daemon ↔ disk (state) | rkyv values inside redb tables |
-| Daemon ↔ disk (config + palettes) | DOTOS text record (`Config`) |
+| Daemon ↔ disk (config + palettes) | generated Datom text record (`Config`) |
 | Daemon ↔ Ghostty config templates | read-only Ghostty-native text files, copied byte-for-byte |
 | Daemon ↔ mutable Ghostty config | `$XDG_CONFIG_HOME/ghostty/config.ghostty` |
 | Daemon ↔ running Pi sessions | Unix-stream line frame (`dark\n` or `light\n`) at the configured socket |
 | Daemon ↔ wl-gammarelay-rs | zbus property writes (`Temperature` u16, `Brightness` f64) |
 | Daemon ↔ geoclue2 | bounded zbus system-bus location read |
 | Daemon ↔ theme concerns | typed Rust values; no apply-command schema |
-| Daemon ↔ human (audit) | DOTOS reply printed by the CLI |
+| Daemon ↔ human (audit) | generated Datom reply printed by the CLI |
 
 JSON / serde appears nowhere in the daemon. The only text
-format accepted as Chroma input is DOTOS (config + CLI); all
+format accepted as Chroma input is Datom (config + CLI); all
 other daemon-owned bytes are rkyv archives.
 
 ## Forbidden Pattern: Global Live-Terminal Fanout

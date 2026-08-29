@@ -1,13 +1,4 @@
 use chroma::{KelvinTemperature, WarmthLevel};
-use dotos::{DotosDecode, DotosEncode, DotosSource};
-
-fn round_trip_dotos<T>(value: &T) -> T
-where
-    T: DotosEncode + DotosDecode + Clone,
-{
-    let text = value.to_dotos();
-    DotosSource::new(&text).parse().expect("decode")
-}
 
 #[test]
 fn levels_are_ordered_warm_to_cold_in_kelvin() {
@@ -156,24 +147,4 @@ fn levels_match_canonical_kelvin() {
     assert_eq!(WarmthLevel::Warm.kelvin().as_u16(), 3700);
     assert_eq!(WarmthLevel::Warmer.kelvin().as_u16(), 3200);
     assert_eq!(WarmthLevel::Warmest.kelvin().as_u16(), 2700);
-}
-
-#[test]
-fn dotos_round_trips_every_level() {
-    for level in [
-        WarmthLevel::Cold,
-        WarmthLevel::Cool,
-        WarmthLevel::Neutral,
-        WarmthLevel::Warm,
-        WarmthLevel::Warmer,
-        WarmthLevel::Warmest,
-    ] {
-        assert_eq!(round_trip_dotos(&level), level);
-    }
-}
-
-#[test]
-fn dotos_encodes_as_pascal_variant_name() {
-    let text = WarmthLevel::Warmest.to_dotos();
-    assert_eq!(text, "Warmest");
 }

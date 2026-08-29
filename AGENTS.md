@@ -4,7 +4,7 @@
 
 Chroma is the **unified visual-state daemon** for the desktop:
 theme, warmth, brightness in one user service, controlled via
-DOTOS.
+Datom.
 
 It replaces darkman + the `nightshift-*` systemd services + the
 `nightshift` and `brightness` shell wrappers + the
@@ -38,14 +38,14 @@ It replaces darkman + the `nightshift-*` systemd services + the
   a location and retried by bounded delayed actor message if it
   is unavailable. There is no `loop { check_time(); sleep(N); }`
   anywhere. See the push-not-pull discipline.
-- **rkyv on the wire, DOTOS at the human boundary.** Daemon ↔
+- **rkyv on the wire, Datom at the human boundary.** Daemon ↔
   CLI is rkyv-archived `Request` / `Response` frames
   on a Unix socket (the canonical signal pattern from
-  the `signal` repository). The CLI parses DOTOS argv into the
-  typed request, archives it, and prints the rkyv-deserialised
-  reply as DOTOS. The daemon never re-parses DOTOS from the CLI.
-- **DOTOS-only data inputs.** Chroma config and palette data are
-  DOTOS. YAML/YML inputs are rejected at the Chroma boundary.
+  the `signal` repository). The CLI embodies schema-generated Datom argv,
+  converts it to a runtime rkyv frame, and prints the generated Datom reply.
+  The daemon never parses human text from the CLI.
+- **Datom-only data inputs.** Chroma config and palette data are
+  Datom. YAML/YML inputs are rejected at the Chroma boundary.
 - **redb + rkyv for state.** Persistent state lives in
   `$XDG_STATE_HOME/chroma/state.redb`. Values are rkyv-archived
   domain records. State is read on boot and re-applied to
@@ -99,7 +99,7 @@ prompts (always `-m '<msg>'`).
 - `lore/rust/rkyv.md` — wire format discipline.
 - `HARD-CONSTRAINTS.md` — architecture locks and matching tests.
 - the `signal` repository — canonical signal pattern reference.
-- the `lojix` repository — typed DOTOS client shape.
+- the `datomic` repository — generated Datom anatomy.
 
 ## Protos estate status
 

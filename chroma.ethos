@@ -1,0 +1,55 @@
+Schema.{0 1 0}
+[]
+Types.[
+  Request.[
+    SetTheme.{mode.ThemeMode}
+    GetTheme
+    SetWarmth.{level.WarmthLevel}
+    SetWarmthKelvin.{kelvin.Integer}
+    StartWarmthRamp.{target.WarmthLevel duration.RampDuration}
+    StartWarmthRampKelvin.{target.Integer duration.RampDuration}
+    InterruptWarmth
+    GetWarmth
+    SetBrightness.{level.BrightnessLevel}
+    SetBrightnessPercent.{percent.Integer}
+    StartBrightnessRamp.{target.BrightnessLevel duration.RampDuration}
+    StartBrightnessRampPercent.{target.Integer duration.RampDuration}
+    InterruptBrightness
+    GetBrightness
+    GetState
+    GetSolarClock
+  ]
+  Reply.[
+    Accepted
+    Theme.{mode.ThemeMode}
+    Warmth.{kelvin.Integer}
+    Brightness.{percent.Integer}
+    State.{theme.ThemeMode kelvin.Integer percent.Integer}
+    SolarClock.{utcOffsetSeconds.Integer equationOfTimeValidUntilUnixSeconds.Integer}
+    SolarClockUnavailable
+    Error.{message.String}
+  ]
+  ThemeMode.[Dark Light]
+  WarmthLevel.[Cold Cool Neutral Warm Warmer Warmest]
+  BrightnessLevel.[Dim Dimmer Mid Bright Brighter Brightest]
+  RampDuration.[Minutes.Integer Seconds.Integer]
+  Config.{theme.ThemeAxis warmth.WarmthAxis brightness.BrightnessAxis}
+  ThemeAxis.{concerns.Vector<ThemeConcern> palettes.ThemePalettes dconf.Option<String> fontPointSize.Option<Integer> ghosttyConfigTemplates.Option<GhosttyConfigTemplates> piThemeControl.Option<PiThemeControl> schedule.ThemeSchedule}
+  ThemeConcern.[Terminal Desktop Ghostty Pi]
+  ThemePalettes.{dark.ThemePalette light.ThemePalette}
+  ThemePalette.{base00.String base01.String base02.String base03.String base04.String base05.String base06.String base07.String base08.String base09.String base0A.String base0B.String base0C.String base0D.String base0E.String base0F.String}
+  GhosttyConfigTemplates.{dark.String light.String}
+  PiThemeControl.{registryDirectory.PiThemeControlRegistryDirectory connectTimeoutMillis.Option<Integer> writeTimeoutMillis.Option<Integer>}
+  PiThemeControlRegistryDirectory.[RuntimeRelative.String Absolute.String]
+  ThemeSchedule.[Manual.ThemeMode Scheduled.{waypoints.Vector<ThemeWaypoint> default.ThemeMode}]
+  ThemeWaypoint.{trigger.RampTrigger mode.ThemeMode}
+  WarmthAxis.{schedule.WarmthSchedule}
+  WarmthSchedule.[Manual.WarmthLevel Scheduled.{waypoints.Vector<WarmthWaypoint> default.WarmthLevel}]
+  WarmthWaypoint.{trigger.RampTrigger target.WarmthLevel rampDuration.RampDuration}
+  BrightnessAxis.{schedule.BrightnessSchedule}
+  BrightnessSchedule.[Manual.BrightnessLevel Scheduled.{waypoints.Vector<BrightnessWaypoint> default.BrightnessLevel}]
+  BrightnessWaypoint.{trigger.RampTrigger target.BrightnessLevel rampDuration.RampDuration}
+  RampTrigger.[Sunrise.Integer Sunset.Integer CivilDawn.Integer CivilDusk.Integer TimeOfDay.{hour.Integer minute.Integer}]
+]
+Kinds.[Datomic.{embody.[Result<Self Fault>] portion.[Portion] textualize.[Text<Self>]}]
+Associations.[]

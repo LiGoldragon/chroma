@@ -1,7 +1,7 @@
 # Skill — chroma
 
 *The unified visual-state daemon for the desktop. Three
-independent axes, one daemon, DOTOS-controlled.*
+independent axes, one daemon, Datom-controlled.*
 
 ---
 
@@ -41,11 +41,10 @@ report, not a pull request.
    terminal path must be explicit, per-window, and
    acknowledgement-bounded.
 
-3. **rkyv on the wire, DOTOS at the human boundary.** Daemon ↔
-   CLI is the signal pattern (length-prefixed rkyv frames over
-   UDS). DOTOS appears only on the CLI argv, the disk config,
-   and the printed reply. The daemon never re-parses DOTOS from
-   the CLI request frame.
+3. **rkyv on the wire, Datom at the human boundary.** Daemon ↔
+   CLI is a length-prefixed rkyv runtime frame over UDS. Datom
+   appears only on the CLI argv, disk config, and printed reply;
+   generated anatomies embody it before the daemon receives a frame.
 
 4. **State lives in redb + rkyv, not ad-hoc data formats.** No
    JSON sidecars and no YAML/YML Chroma inputs. Terminal helper
@@ -82,7 +81,7 @@ report, not a pull request.
 ## What this repo does NOT own
 
 - The Ignis colour palette's authorship. Palette data enters
-  Chroma as DOTOS; Chroma applies it but does not edit,
+  Chroma as Datom; Chroma applies it but does not edit,
   generate, or version it.
 - The wl-gammarelay-rs daemon. Chroma is its sole consumer; the
   daemon's lifecycle is owned by the home-manager systemd unit.
@@ -143,4 +142,4 @@ If a change touches one of these, the change goes upstream
 - `~/primary/skills/actor-systems.md` — actor-system discipline.
 - `lore/rust/rkyv.md` — wire-format discipline, feature pinning.
 - `~/primary/repos/signal` — the canonical signal pattern.
-- `~/primary/repos/lojix` — typed DOTOS client shape.
+- `~/primary/repos/datomic` — Datom text anatomy.
