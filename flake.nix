@@ -20,7 +20,13 @@
         };
 
         inherit (rust) craneLib toolchain;
-        src = rust.cleanCargoSource ./.;
+        ethosMapFilter =
+          path: type:
+          type == "regular" && toString path == toString ./chroma.ethos;
+        src = rust.cleanSource {
+          root = ./.;
+          extraFilters = [ ethosMapFilter ];
+        };
         commonArgs = {
           inherit src;
           strictDeps = true;
