@@ -6,7 +6,7 @@
 //! length-prefixed [`chroma::Response`], and prints the reply
 //! as Datom.
 
-use datomic::{Datomic, Text, TextEdge};
+use datom_codec::{Actualizable, IncorporationBudget, Potential, Textualizable};
 
 fn main() -> chroma::Result<()> {
     let mut args = std::env::args().skip(1);
@@ -15,8 +15,8 @@ fn main() -> chroma::Result<()> {
         std::process::exit(2);
     });
 
-    let request = Text::<chroma::generated::Request>::from(request_text.as_str())
-        .embody()
+    let request = Potential::<chroma::generated::Request>::from(request_text.as_str())
+        .actualize(IncorporationBudget::try_from(4096).expect("positive request budget"))
         .map_err(|error| chroma::Error::Config { message: format!("Datom request: {error:?}") })?;
     let request = chroma::Request::try_from(request)?;
     let response = chroma::client::send(&request)?;
@@ -24,7 +24,7 @@ fn main() -> chroma::Result<()> {
         chroma::Response::Error { message } => Err(chroma::Error::Daemon { message }),
         response => {
             let reply = chroma::generated::Reply::try_from(response)?;
-            println!("{}", reply.textualize().as_ref());
+            println!("{}", reply.textualize());
             Ok(())
         }
     }

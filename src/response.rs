@@ -43,28 +43,30 @@ impl TryFrom<Response> for generated::Reply {
         };
         Ok(match response {
             Response::Accepted => Self::Accepted,
-            Response::Theme { mode } => Self::Theme(generated::ReplyTheme { mode: theme(mode) }),
-            Response::Warmth { kelvin } => Self::Warmth(generated::ReplyWarmth { kelvin: i64::from(kelvin.as_u16()) }),
-            Response::Brightness { percent } => {
-                Self::Brightness(generated::ReplyBrightness { percent: i64::from(percent.as_u8()) })
+            Response::Theme { mode } => Self::Theme(generated::ReplyTheme(theme(mode))),
+            Response::Warmth { kelvin } => {
+                Self::Warmth(generated::ReplyWarmth(protos::Integer::from(i64::from(kelvin.as_u16()))))
             }
-            Response::State { theme: value, kelvin, percent } => Self::State(generated::ReplyState {
-                theme: theme(value),
-                kelvin: i64::from(kelvin.as_u16()),
-                percent: i64::from(percent.as_u8()),
-            }),
+            Response::Brightness { percent } => {
+                Self::Brightness(generated::ReplyBrightness(protos::Integer::from(i64::from(percent.as_u8()))))
+            }
+            Response::State { theme: value, kelvin, percent } => Self::State(generated::ReplyState(
+                theme(value),
+                protos::Integer::from(i64::from(kelvin.as_u16())),
+                protos::Integer::from(i64::from(percent.as_u8())),
+            )),
             Response::SolarClock { utc_offset_seconds, equation_of_time_valid_until_unix_seconds } => {
-                Self::SolarClock(generated::ReplySolarClock {
-                    utc_offset_seconds: i64::from(utc_offset_seconds),
-                    equation_of_time_valid_until_unix_seconds,
-                })
+                Self::SolarClock(generated::ReplySolarClock(
+                    protos::Integer::from(i64::from(utc_offset_seconds)),
+                    protos::Integer::from(equation_of_time_valid_until_unix_seconds),
+                ))
             }
             Response::SolarClockUnavailable => Self::SolarClockUnavailable,
-            Response::Error { message } => Self::Error(generated::ReplyError {
-                message: datomic::DatomicString::try_from(message).map_err(|error| Error::Config {
+            Response::Error { message } => {
+                Self::Error(generated::ReplyError(protos::Text::try_from(message).map_err(|error| Error::Config {
                     message: format!("daemon reply cannot be rendered as Datom: {error:?}"),
-                })?,
-            }),
+                })?))
+            }
         })
     }
 }

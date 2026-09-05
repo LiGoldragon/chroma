@@ -4,7 +4,7 @@ use core::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use datomic::{Text, TextEdge};
+use datom_codec::{Actualizable, IncorporationBudget, Potential};
 
 use crate::brightness::{BrightnessAxis, BrightnessLevel, BrightnessSchedule, BrightnessWaypoint};
 use crate::error::{Error, Result};
@@ -57,8 +57,8 @@ impl ConfigFile {
     }
 
     fn decode_config(text: &str) -> Result<Config> {
-        Text::<data::Config>::from(text)
-            .embody()
+        Potential::<data::Config>::from(text)
+            .actualize(IncorporationBudget::try_from(16_384).expect("positive config budget"))
             .map_err(|error| Error::Config { message: format!("Datom config: {error:?}") })?
             .try_into()
     }
@@ -84,19 +84,30 @@ impl TryFrom<data::Config> for Config {
     type Error = Error;
 
     fn try_from(value: data::Config) -> Result<Self> {
+        let data::Config(theme, warmth, brightness) = value;
+        let data::WarmthAxis(warmth_data) = warmth;
+        let data::BrightnessAxis(brightness_data) = brightness;
         Ok(Self {
-            theme: theme_axis(value.theme)?,
-            warmth: WarmthAxis { schedule: warmth_schedule(value.warmth.schedule)? },
-            brightness: BrightnessAxis { schedule: brightness_schedule(value.brightness.schedule)? },
+            theme: theme_axis(theme)?,
+            warmth: WarmthAxis { schedule: warmth_schedule(warmth_data)? },
+            brightness: BrightnessAxis { schedule: brightness_schedule(brightness_data)? },
         })
     }
 }
 
 fn theme_axis(value: data::ThemeAxis) -> Result<ThemeAxis> {
-    let concerns = value.concerns.into_iter().map(theme_concern).collect::<Vec<_>>();
-    let ghostty_config_templates = value.ghostty_config_templates.map(|templates| GhosttyConfigTemplates {
-        dark: PathBuf::from(templates.dark.as_ref()),
-        light: PathBuf::from(templates.light.as_ref()),
+    let data::ThemeAxis(
+        concerns,
+        palettes,
+        dconf,
+        font_point_size,
+        ghostty_config_templates,
+        pi_theme_control_data,
+        schedule,
+    ) = value;
+    let concerns = concerns.into_iter().map(theme_concern).collect::<Vec<_>>();
+    let ghostty_config_templates = ghostty_config_templates.map(|data::GhosttyConfigTemplates(dark, light)| {
+        GhosttyConfigTemplates { dark: PathBuf::from(dark.as_ref()), light: PathBuf::from(light.as_ref()) }
     });
     if concerns.contains(&ThemeConcern::Ghostty) && ghostty_config_templates.is_none() {
         return Err(Error::Config {
@@ -105,38 +116,62 @@ fn theme_axis(value: data::ThemeAxis) -> Result<ThemeAxis> {
     }
     Ok(ThemeAxis {
         concerns,
-        palettes: ThemePalettes { dark: palette(value.palettes.dark), light: palette(value.palettes.light) },
-        adapters: ThemeAdapters { dconf: value.dconf.map(|path| PathBuf::from(path.as_ref())) },
-        font_point_size: optional_positive_u8(value.font_point_size, "fontPointSize", 12)?,
+        palettes: theme_palettes(palettes),
+        adapters: ThemeAdapters { dconf: dconf.map(|path| PathBuf::from(path.as_ref())) },
+        font_point_size: optional_positive_u8(font_point_size.map(i64::from), "fontPointSize", 12)?,
         ghostty_config_templates,
-        pi_theme_control: value.pi_theme_control.map(pi_theme_control).transpose()?,
-        schedule: theme_schedule(value.schedule)?,
+        pi_theme_control: pi_theme_control_data.map(pi_theme_control).transpose()?,
+        schedule: theme_schedule(schedule)?,
     })
 }
 
+fn theme_palettes(value: data::ThemePalettes) -> ThemePalettes {
+    let data::ThemePalettes(dark, light) = value;
+    ThemePalettes { dark: palette(dark), light: palette(light) }
+}
+
 fn palette(value: data::ThemePalette) -> ThemePalette {
+    let data::ThemePalette(
+        base00,
+        base01,
+        base02,
+        base03,
+        base04,
+        base05,
+        base06,
+        base07,
+        base08,
+        base09,
+        base0a,
+        base0b,
+        base0c,
+        base0d,
+        base0e,
+        base0f,
+    ) = value;
     ThemePalette {
-        base00: value.base00.as_ref().into(),
-        base01: value.base01.as_ref().into(),
-        base02: value.base02.as_ref().into(),
-        base03: value.base03.as_ref().into(),
-        base04: value.base04.as_ref().into(),
-        base05: value.base05.as_ref().into(),
-        base06: value.base06.as_ref().into(),
-        base07: value.base07.as_ref().into(),
-        base08: value.base08.as_ref().into(),
-        base09: value.base09.as_ref().into(),
-        base0a: value.base0_a.as_ref().into(),
-        base0b: value.base0_b.as_ref().into(),
-        base0c: value.base0_c.as_ref().into(),
-        base0d: value.base0_d.as_ref().into(),
-        base0e: value.base0_e.as_ref().into(),
-        base0f: value.base0_f.as_ref().into(),
+        base00: base00.as_ref().into(),
+        base01: base01.as_ref().into(),
+        base02: base02.as_ref().into(),
+        base03: base03.as_ref().into(),
+        base04: base04.as_ref().into(),
+        base05: base05.as_ref().into(),
+        base06: base06.as_ref().into(),
+        base07: base07.as_ref().into(),
+        base08: base08.as_ref().into(),
+        base09: base09.as_ref().into(),
+        base0a: base0a.as_ref().into(),
+        base0b: base0b.as_ref().into(),
+        base0c: base0c.as_ref().into(),
+        base0d: base0d.as_ref().into(),
+        base0e: base0e.as_ref().into(),
+        base0f: base0f.as_ref().into(),
     }
 }
 
 fn pi_theme_control(value: data::PiThemeControl) -> Result<PiThemeControl> {
-    let registry_directory = match value.registry_directory {
+    let data::PiThemeControl(registry_directory, connect_timeout_millis, write_timeout_millis) = value;
+    let registry_directory = match registry_directory {
         data::PiThemeControlRegistryDirectory::RuntimeRelative(path) => {
             PiThemeControlRegistryDirectory::runtime_relative(path.as_ref())
         }
@@ -147,12 +182,12 @@ fn pi_theme_control(value: data::PiThemeControl) -> Result<PiThemeControl> {
     Ok(PiThemeControl {
         registry_directory,
         connect_timeout: Duration::from_millis(optional_positive_u64(
-            value.connect_timeout_millis,
+            connect_timeout_millis.map(i64::from),
             "connectTimeoutMillis",
             100,
         )?),
         write_timeout: Duration::from_millis(optional_positive_u64(
-            value.write_timeout_millis,
+            write_timeout_millis.map(i64::from),
             "writeTimeoutMillis",
             100,
         )?),
@@ -201,14 +236,15 @@ fn theme_schedule(value: data::ThemeSchedule) -> Result<ThemeSchedule> {
     match value {
         data::ThemeSchedule::Manual(mode) => Ok(ThemeSchedule::Manual(theme_mode(mode))),
         data::ThemeSchedule::Scheduled(value) => {
-            let waypoints = value
-                .waypoints
+            let data::ThemeScheduleScheduled(waypoints, default) = value;
+            let waypoints = waypoints
                 .into_iter()
                 .map(|waypoint| {
-                    Ok(ThemeWaypoint { trigger: trigger(waypoint.trigger)?, mode: theme_mode(waypoint.mode) })
+                    let data::ThemeWaypoint(trigger_value, mode) = waypoint;
+                    Ok(ThemeWaypoint { trigger: trigger(trigger_value)?, mode: theme_mode(mode) })
                 })
                 .collect::<Result<Vec<_>>>()?;
-            scheduled(waypoints, value.default, "theme", |waypoints, default| ThemeSchedule::Scheduled {
+            scheduled(waypoints, default, "theme", |waypoints, default| ThemeSchedule::Scheduled {
                 waypoints,
                 default: theme_mode(default),
             })
@@ -220,18 +256,19 @@ fn warmth_schedule(value: data::WarmthSchedule) -> Result<WarmthSchedule> {
     match value {
         data::WarmthSchedule::Manual(level) => Ok(WarmthSchedule::Manual(warmth_level(level))),
         data::WarmthSchedule::Scheduled(value) => {
-            let waypoints = value
-                .waypoints
+            let data::WarmthScheduleScheduled(waypoints, default) = value;
+            let waypoints = waypoints
                 .into_iter()
                 .map(|waypoint| {
+                    let data::WarmthWaypoint(trigger_value, target, ramp_duration) = waypoint;
                     Ok(WarmthWaypoint {
-                        trigger: trigger(waypoint.trigger)?,
-                        target: warmth_level(waypoint.target),
-                        ramp_duration: duration(waypoint.ramp_duration)?,
+                        trigger: trigger(trigger_value)?,
+                        target: warmth_level(target),
+                        ramp_duration: duration(ramp_duration)?,
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
-            scheduled(waypoints, value.default, "warmth", |waypoints, default| WarmthSchedule::Scheduled {
+            scheduled(waypoints, default, "warmth", |waypoints, default| WarmthSchedule::Scheduled {
                 waypoints,
                 default: warmth_level(default),
             })
@@ -243,18 +280,19 @@ fn brightness_schedule(value: data::BrightnessSchedule) -> Result<BrightnessSche
     match value {
         data::BrightnessSchedule::Manual(level) => Ok(BrightnessSchedule::Manual(brightness_level(level))),
         data::BrightnessSchedule::Scheduled(value) => {
-            let waypoints = value
-                .waypoints
+            let data::BrightnessScheduleScheduled(waypoints, default) = value;
+            let waypoints = waypoints
                 .into_iter()
                 .map(|waypoint| {
+                    let data::BrightnessWaypoint(trigger_value, target, ramp_duration) = waypoint;
                     Ok(BrightnessWaypoint {
-                        trigger: trigger(waypoint.trigger)?,
-                        target: brightness_level(waypoint.target),
-                        ramp_duration: duration(waypoint.ramp_duration)?,
+                        trigger: trigger(trigger_value)?,
+                        target: brightness_level(target),
+                        ramp_duration: duration(ramp_duration)?,
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
-            scheduled(waypoints, value.default, "brightness", |waypoints, default| BrightnessSchedule::Scheduled {
+            scheduled(waypoints, default, "brightness", |waypoints, default| BrightnessSchedule::Scheduled {
                 waypoints,
                 default: brightness_level(default),
             })
@@ -275,7 +313,8 @@ fn scheduled<Value, Default, Output>(
 }
 
 fn trigger(value: data::RampTrigger) -> Result<RampTrigger> {
-    let offset = |value: i64| {
+    let offset = |value: protos::Integer| {
+        let value = i64::from(value);
         i16::try_from(value)
             .map(SignedMinutes::new)
             .map_err(|_| Error::Config { message: format!("solar offset must fit signed 16-bit minutes, got {value}") })
@@ -285,17 +324,17 @@ fn trigger(value: data::RampTrigger) -> Result<RampTrigger> {
         data::RampTrigger::Sunset(value) => RampTrigger::Sunset(offset(value)?),
         data::RampTrigger::CivilDawn(value) => RampTrigger::CivilDawn(offset(value)?),
         data::RampTrigger::CivilDusk(value) => RampTrigger::CivilDusk(offset(value)?),
-        data::RampTrigger::TimeOfDay(value) => RampTrigger::TimeOfDay(
-            checked_time(value.hour, 23, "TimeOfDay hour").map(LocalHour::new)?,
-            checked_time(value.minute, 59, "TimeOfDay minute").map(LocalMinute::new)?,
+        data::RampTrigger::TimeOfDay(data::RampTriggerTimeOfDay(hour, minute)) => RampTrigger::TimeOfDay(
+            checked_time(i64::from(hour), 23, "TimeOfDay hour").map(LocalHour::new)?,
+            checked_time(i64::from(minute), 59, "TimeOfDay minute").map(LocalMinute::new)?,
         ),
     })
 }
 
 fn duration(value: data::RampDuration) -> Result<RampDuration> {
     match value {
-        data::RampDuration::Minutes(value) => u32::try_from(value).map(RampDuration::from_minutes),
-        data::RampDuration::Seconds(value) => u64::try_from(value).map(RampDuration::from_seconds),
+        data::RampDuration::Minutes(value) => u32::try_from(i64::from(value)).map(RampDuration::from_minutes),
+        data::RampDuration::Seconds(value) => u64::try_from(i64::from(value)).map(RampDuration::from_seconds),
     }
     .map_err(|_| Error::Config { message: "ramp duration must be non-negative".into() })
 }

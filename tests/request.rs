@@ -1,12 +1,12 @@
 //! Generated Datom request boundary and runtime-only rkyv frame tests.
 
 use chroma::{BrightnessLevel, BrightnessPercent, KelvinTemperature, RampDuration, Request, ThemeMode, WarmthLevel};
-use datomic::{Text, TextEdge};
+use datom_codec::{Actualizable, IncorporationBudget, Potential};
 
 fn request(text: &str) -> Request {
-    Text::<chroma::generated::Request>::from(text)
-        .embody()
-        .unwrap_or_else(|error| panic!("embody Datom request {text:?}: {error:?}"))
+    Potential::<chroma::generated::Request>::from(text)
+        .actualize(IncorporationBudget::try_from(4096).expect("positive request budget"))
+        .unwrap_or_else(|error| panic!("incorporate Datom request {text:?}: {error:?}"))
         .try_into()
         .expect("validate runtime request")
 }
@@ -45,11 +45,17 @@ fn generated_datom_becomes_validated_runtime_requests() {
 
 #[test]
 fn generated_datom_rejects_legacy_parenthesis_syntax() {
-    assert!(Text::<chroma::generated::Request>::from("SetTheme.(Dark)").embody().is_err());
+    assert!(
+        Potential::<chroma::generated::Request>::from("SetTheme.(Dark)")
+            .actualize(IncorporationBudget::try_from(4096).expect("positive request budget"))
+            .is_err()
+    );
 }
 
 #[test]
 fn runtime_validation_rejects_negative_numeric_values() {
-    let data = Text::<chroma::generated::Request>::from("SetWarmthKelvin.{-1}").embody().expect("shape is data");
+    let data = Potential::<chroma::generated::Request>::from("SetWarmthKelvin.{-1}")
+        .actualize(IncorporationBudget::try_from(4096).expect("positive request budget"))
+        .expect("shape is data");
     assert!(Request::try_from(data).is_err());
 }
