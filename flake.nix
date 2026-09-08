@@ -36,6 +36,11 @@
         chromaPackage = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
         });
+        chromaSetDarkTheme = pkgs.writeShellApplication {
+          name = "chroma-set-dark-theme";
+          runtimeInputs = [ chromaPackage ];
+          text = builtins.readFile ./scripts/chroma-set-dark-theme;
+        };
         pythonWithDbusNext = pkgs.python3.withPackages (pythonPackages: [
           pythonPackages.dbus-next
         ]);
@@ -61,6 +66,7 @@
           name = "chroma-sandbox-terminal";
           runtimeInputs = [
             chromaPackage
+            chromaSetDarkTheme
             fakeGammaService
             fakeGhosttyService
             pkgs.coreutils
@@ -77,6 +83,7 @@
       {
         packages.default = chromaPackage;
         packages.chroma-sandbox-terminal = chromaSandboxTerminal;
+        packages.chroma-set-dark-theme = chromaSetDarkTheme;
 
         checks.default = craneLib.cargoTest (commonArgs // {
           inherit cargoArtifacts;
@@ -98,6 +105,16 @@
               --no-terminal \
               --artifact-root "$out"
           '';
+        checks.set-dark-theme-example = pkgs.runCommand "chroma-set-dark-theme-example-check"
+          {
+            nativeBuildInputs = [ chromaSandboxTerminal ];
+          }
+          ''
+            chroma-sandbox-terminal \
+              --no-systemd \
+              --no-terminal \
+              --artifact-root "$out"
+          '';
 
         apps.sandbox-terminal = flake-utils.lib.mkApp {
           drv = chromaSandboxTerminal;
@@ -112,6 +129,9 @@
               exec chroma-sandbox-terminal --no-systemd --no-terminal "$@"
             '';
           };
+        };
+        apps.set-dark-theme = flake-utils.lib.mkApp {
+          drv = chromaSetDarkTheme;
         };
 
         devShells.default = pkgs.mkShell {

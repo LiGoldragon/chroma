@@ -25,6 +25,14 @@ wrapper with a single user-service component:
   the request; slow desktop or app work cannot hold terminal
   updates hostage.
 
+## Set the dark theme
+
+Run `nix run .#set-dark-theme` from a Chroma checkout. The app installs the
+clear `chroma-set-dark-theme` command and executes its canonical request from
+[`scripts/chroma-set-dark-theme`](scripts/chroma-set-dark-theme). CriomOS-home
+places that same command on the user's PATH; neither Home activation nor the
+Chroma service invokes it automatically.
+
 ## Emacs session-bus boundary
 
 Chroma owns `io.github.LiGoldragon.Chroma` on the same-user session
