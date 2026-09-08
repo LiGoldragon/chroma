@@ -31,7 +31,8 @@ Run `nix run .#set-dark-theme` from a Chroma checkout. The app installs the
 clear `chroma-set-dark-theme` command and executes its canonical request from
 [`scripts/chroma-set-dark-theme`](scripts/chroma-set-dark-theme). CriomOS-home
 places that same command on the user's PATH; neither Home activation nor the
-Chroma service invokes it automatically.
+Chroma service invokes it automatically. Run it from the graphical user
+session, where `XDG_RUNTIME_DIR` identifies the running Chroma daemon socket.
 
 ## Emacs session-bus boundary
 
