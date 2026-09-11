@@ -175,8 +175,8 @@ palette = 14=#9930cc
 palette = 15=#1a1510
 GHOSTTY_LIGHT
 
-  left_quote="$(printf '\342\200\234')"
-  right_quote="$(printf '\342\200\235')"
+  left_quote="$(printf '\302\253')"
+  right_quote="$(printf '\302\273')"
   cat > "$CHROMA_CONFIG" <<DATOM
 {{[Terminal Ghostty] {{#000000 #1a1a1a #2d2d2d #505050 #b0b0b0 #d0d0d0 #e0e0e0 #ffffff #ff0066 #ff8800 #f5c000 #00cc44 #cc0044 #e040a0 #bb44ee #ff5577} {#faf5f0 #efe8e2 #ddd5ce #887a70 #6a5e55 #3d3530 #2a2420 #1a1510 #cc0044 #d06600 #b89000 #1a8a30 #9930cc #b03080 #8822bb #cc3355}} None Some.14 Some.{${left_quote}$XDG_CONFIG_HOME/ghostty/dark-template.ghostty${right_quote} ${left_quote}$XDG_CONFIG_HOME/ghostty/light-template.ghostty${right_quote}} None Manual.Dark} Manual.Neutral Manual.Bright}
 DATOM
