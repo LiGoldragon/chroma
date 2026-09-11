@@ -29,3 +29,14 @@ fn generated_request_keeps_the_datom_boundary_in_one_anatomy() {
     assert!(matches!(request, Request::SetTheme(ThemeMode::Light)));
     assert_eq!(request.datomize(vec![]).protosize().textualize(), "SetTheme.Light");
 }
+
+#[test]
+fn strings_with_structural_separators_round_trip_canonically() {
+    let value = Some("5::7/128".to_owned());
+    let text = value.datomize(vec![]).protosize().textualize();
+    assert_eq!(text, "Some.«5::7/128»");
+
+    let mut value = Potential::<Option<String>>::from(text.as_str());
+    let mut budget = Budget { remaining: 4096, reader: protos::ReaderBudget { remaining: 4096 }, depth: 0, maximum_depth: 4096 };
+    assert_eq!(value.actualize(&mut budget).expect("read quoted option string"), Some("5::7/128".to_owned()));
+}

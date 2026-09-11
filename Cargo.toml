@@ -22,7 +22,7 @@ path = "src/bin/chroma_daemon.rs"
 chrono       = { version = "0.4", default-features = false, features = ["clock"] }
 futures-util = "0.3"
 kameo        = { git = "https://github.com/LiGoldragon/kameo.git", branch = "main", default-features = false, features = ["macros", "tracing"] }
-datom-codec  = { git = "https://github.com/LiGoldragon/datom-codec", rev = "f2cc06858d38a4028c928d33323a6d682e7c222f" }
+datom-codec  = { git = "https://github.com/LiGoldragon/datom-codec", rev = "9bffbf14f8de54a9d8f25a9fcf9120061401ded2" }
 notify       = "5.2"
 redb         = "2.6.3"
 rkyv         = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
