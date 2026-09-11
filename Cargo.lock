@@ -178,16 +178,16 @@ dependencies = [
 [[package]]
 name = "datom-codec"
 version = "0.25.7"
-source = "git+https://github.com/LiGoldragon/datom-codec?rev=9bffbf14f8de54a9d8f25a9fcf9120061401ded2#9bffbf14f8de54a9d8f25a9fcf9120061401ded2"
+source = "git+https://github.com/LiGoldragon/datom-codec?rev=99a9e8c9cbdb88650cc2511644b89428c22129e2#99a9e8c9cbdb88650cc2511644b89428c22129e2"
 dependencies = [
- "datom-codec-derive 0.25.6 (git+https://github.com/LiGoldragon/datom-codec?rev=9bffbf14f8de54a9d8f25a9fcf9120061401ded2)",
+ "datom-codec-derive 0.25.6 (git+https://github.com/LiGoldragon/datom-codec?rev=99a9e8c9cbdb88650cc2511644b89428c22129e2)",
  "protos",
 ]
 
 [[package]]
 name = "datom-codec-derive"
 version = "0.25.6"
-source = "git+https://github.com/LiGoldragon/datom-codec?rev=9bffbf14f8de54a9d8f25a9fcf9120061401ded2#9bffbf14f8de54a9d8f25a9fcf9120061401ded2"
+source = "git+https://github.com/LiGoldragon/datom-codec?rev=99a9e8c9cbdb88650cc2511644b89428c22129e2#99a9e8c9cbdb88650cc2511644b89428c22129e2"
 dependencies = [
  "proc-macro2",
  "quote",

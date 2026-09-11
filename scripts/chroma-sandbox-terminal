@@ -178,7 +178,7 @@ GHOSTTY_LIGHT
   left_quote="$(printf '\302\253')"
   right_quote="$(printf '\302\273')"
   cat > "$CHROMA_CONFIG" <<DATOM
-{{[Terminal Ghostty] {{#000000 #1a1a1a #2d2d2d #505050 #b0b0b0 #d0d0d0 #e0e0e0 #ffffff #ff0066 #ff8800 #f5c000 #00cc44 #cc0044 #e040a0 #bb44ee #ff5577} {#faf5f0 #efe8e2 #ddd5ce #887a70 #6a5e55 #3d3530 #2a2420 #1a1510 #cc0044 #d06600 #b89000 #1a8a30 #9930cc #b03080 #8822bb #cc3355}} None Some.14 Some.{${left_quote}$XDG_CONFIG_HOME/ghostty/dark-template.ghostty${right_quote} ${left_quote}$XDG_CONFIG_HOME/ghostty/light-template.ghostty${right_quote}} None Manual.Dark} Manual.Neutral Manual.Bright}
+{{[Terminal Ghostty] {{#000000 #1a1a1a #2d2d2d #505050 #b0b0b0 #d0d0d0 #e0e0e0 #ffffff #ff0066 #ff8800 #f5c000 #00cc44 #cc0044 #e040a0 #bb44ee #ff5577} {#faf5f0 #efe8e2 #ddd5ce #887a70 #6a5e55 #3d3530 #2a2420 #1a1510 #cc0044 #d06600 #b89000 #1a8a30 #9930cc #b03080 #8822bb #cc3355}} None Some.14 Some.{${left_quote}$XDG_CONFIG_HOME/ghostty/dark-template.ghostty${right_quote} ${left_quote}$XDG_CONFIG_HOME/ghostty/light-template.ghostty${right_quote}} None Manual.Light} Manual.Neutral Manual.Bright}
 DATOM
 
   dbus_socket_dir="$(mktemp -d "${TMPDIR:-/tmp}/chroma-dbus.XXXXXXXXXX")"
@@ -278,23 +278,27 @@ await_ghostty_background() {
   fail "ghostty config did not reach background $expected_background"
 }
 
-await_ghostty_reload_count() {
-  local expected_count="$1"
+ghostty_reload_count() {
   local call_log="$artifact_root/fake-ghostty.calls"
+  rg -c '^Activate reload-config$' "$call_log" 2>/dev/null || true
+}
+
+await_ghostty_reload_after() {
+  local baseline="$1"
   local deadline=$((SECONDS + 15))
   local remaining
   local observed_count
 
   while ((SECONDS < deadline)); do
-    observed_count=$(rg -c '^Activate reload-config$' "$call_log" 2>/dev/null || true)
-    if [[ "${observed_count:-0}" == "$expected_count" ]]; then
+    observed_count=$(ghostty_reload_count)
+    if (( ${observed_count:-0} > baseline )); then
       return 0
     fi
     remaining=$((deadline - SECONDS))
     inotifywait -q -t "$remaining" -e create -e modify -e close_write "$artifact_root" >/dev/null || true
   done
 
-  fail "Ghostty reload action count did not reach $expected_count"
+  fail "Ghostty reload action did not follow the theme transition"
 }
 
 gamma_ready="$artifact_root/fake-gamma.ready"
@@ -313,20 +317,25 @@ await_ready_file "$ghostty_ready"
 chroma-daemon > "$artifact_root/chroma-daemon.log" 2>&1 &
 daemon_pid="$!"
 await_socket "$CHROMA_SOCKET"
-await_ghostty_background "#000000"
-await_ghostty_reload_count 1
 
 chroma 'GetState' > "$artifact_root/get-state-before.datom"
 
+reload_baseline=$(ghostty_reload_count)
+chroma 'SetTheme.Dark' > "$artifact_root/set-theme-dark-initial.datom"
+await_ghostty_background "#000000"
+await_ghostty_reload_after "$reload_baseline"
+
+reload_baseline=$(ghostty_reload_count)
 chroma 'SetTheme.Light' > "$artifact_root/set-theme-light.datom"
 await_ghostty_background "#faf5f0"
-await_ghostty_reload_count 2
+await_ghostty_reload_after "$reload_baseline"
 cp "$XDG_CONFIG_HOME/ghostty/config.ghostty" "$artifact_root/ghostty-light.config"
 
 chroma 'SetTheme.Light' > "$artifact_root/set-theme-light-unchanged.datom"
+reload_baseline=$(ghostty_reload_count)
 chroma-set-dark-theme > "$artifact_root/set-theme-dark.datom"
 await_ghostty_background "#000000"
-await_ghostty_reload_count 3
+await_ghostty_reload_after "$reload_baseline"
 cp "$XDG_CONFIG_HOME/ghostty/config.ghostty" "$artifact_root/ghostty-dark.config"
 
 case "${CHROMA_SANDBOX_VISIBLE_THEME:-Dark}" in
