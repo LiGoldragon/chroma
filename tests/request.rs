@@ -1,11 +1,13 @@
 //! Generated Datom request boundary and runtime-only rkyv frame tests.
 
 use chroma::{BrightnessLevel, BrightnessPercent, KelvinTemperature, RampDuration, Request, ThemeMode, WarmthLevel};
-use datom_codec::{Actualizable, IncorporationBudget, Potential};
+use datom_codec::{Actualizing, Budget, Potential};
 
 fn request(text: &str) -> Request {
-    Potential::<chroma::generated::Request>::from(text)
-        .actualize(IncorporationBudget::try_from(4096).expect("positive request budget"))
+    let mut potential = Potential::<chroma::generated::Request>::from(text);
+    let mut budget = Budget { remaining: 4096, reader: protos::ReaderBudget { remaining: 4096 }, depth: 0, maximum_depth: 4096 };
+    potential
+        .actualize(&mut budget)
         .unwrap_or_else(|error| panic!("incorporate Datom request {text:?}: {error:?}"))
         .try_into()
         .expect("validate runtime request")
@@ -18,15 +20,15 @@ fn round_trip_rkyv(request: &Request) {
 #[test]
 fn generated_datom_becomes_validated_runtime_requests() {
     let requests = [
-        ("SetTheme.{Dark}", Request::SetTheme { mode: ThemeMode::Dark }),
-        ("SetWarmth.{Warm}", Request::SetWarmth { level: WarmthLevel::Warm }),
-        ("SetWarmthKelvin.{3500}", Request::SetWarmthKelvin { kelvin: KelvinTemperature::new(3500) }),
+        ("SetTheme.Dark", Request::SetTheme { mode: ThemeMode::Dark }),
+        ("SetWarmth.Warm", Request::SetWarmth { level: WarmthLevel::Warm }),
+        ("SetWarmthKelvin.3500", Request::SetWarmthKelvin { kelvin: KelvinTemperature::new(3500) }),
         (
             "StartWarmthRamp.{Warmest Minutes.60}",
             Request::StartWarmthRamp { target: WarmthLevel::Warmest, duration: RampDuration::from_minutes(60) },
         ),
-        ("SetBrightness.{Mid}", Request::SetBrightness { level: BrightnessLevel::Mid }),
-        ("SetBrightnessPercent.{65}", Request::SetBrightnessPercent { percent: BrightnessPercent::new(65) }),
+        ("SetBrightness.Mid", Request::SetBrightness { level: BrightnessLevel::Mid }),
+        ("SetBrightnessPercent.65", Request::SetBrightnessPercent { percent: BrightnessPercent::new(65) }),
         (
             "StartBrightnessRampPercent.{40 Seconds.10}",
             Request::StartBrightnessRampPercent {
@@ -46,16 +48,21 @@ fn generated_datom_becomes_validated_runtime_requests() {
 #[test]
 fn generated_datom_rejects_legacy_parenthesis_syntax() {
     assert!(
-        Potential::<chroma::generated::Request>::from("SetTheme.(Dark)")
-            .actualize(IncorporationBudget::try_from(4096).expect("positive request budget"))
+        {
+            let mut potential = Potential::<chroma::generated::Request>::from("SetTheme.{Dark}");
+            let mut budget = Budget { remaining: 4096, reader: protos::ReaderBudget { remaining: 4096 }, depth: 0, maximum_depth: 4096 };
+            potential.actualize(&mut budget)
+        }
             .is_err()
     );
 }
 
 #[test]
 fn runtime_validation_rejects_negative_numeric_values() {
-    let data = Potential::<chroma::generated::Request>::from("SetWarmthKelvin.{-1}")
-        .actualize(IncorporationBudget::try_from(4096).expect("positive request budget"))
+    let mut potential = Potential::<chroma::generated::Request>::from("SetWarmthKelvin.-1");
+    let mut budget = Budget { remaining: 4096, reader: protos::ReaderBudget { remaining: 4096 }, depth: 0, maximum_depth: 4096 };
+    let data = potential
+        .actualize(&mut budget)
         .expect("shape is data");
     assert!(Request::try_from(data).is_err());
 }

@@ -1,47 +1,48 @@
-Types
+Library
 []
 [
- Request.[ SetTheme.RequestSetTheme GetTheme SetWarmth.RequestSetWarmth SetWarmthKelvin.RequestSetWarmthKelvin StartWarmthRamp.RequestStartWarmthRamp StartWarmthRampKelvin.RequestStartWarmthRampKelvin InterruptWarmth GetWarmth SetBrightness.RequestSetBrightness SetBrightnessPercent.RequestSetBrightnessPercent StartBrightnessRamp.RequestStartBrightnessRamp StartBrightnessRampPercent.RequestStartBrightnessRampPercent InterruptBrightness GetBrightness GetState GetSolarClock ]
- RequestSetTheme.{ ThemeMode }
- RequestSetWarmth.{ WarmthLevel }
- RequestSetWarmthKelvin.{ Integer }
+ Request.[ SetTheme.ThemeMode GetTheme SetWarmth.WarmthLevel SetWarmthKelvin.Integer StartWarmthRamp.RequestStartWarmthRamp StartWarmthRampKelvin.RequestStartWarmthRampKelvin InterruptWarmth GetWarmth SetBrightness.BrightnessLevel SetBrightnessPercent.Integer StartBrightnessRamp.RequestStartBrightnessRamp StartBrightnessRampPercent.RequestStartBrightnessRampPercent InterruptBrightness GetBrightness GetState GetSolarClock ]
+ RequestSetTheme.ThemeMode
+ RequestSetWarmth.WarmthLevel
+ RequestSetWarmthKelvin.Integer
  RequestStartWarmthRamp.{ WarmthLevel RampDuration }
  RequestStartWarmthRampKelvin.{ Integer RampDuration }
- RequestSetBrightness.{ BrightnessLevel }
- RequestSetBrightnessPercent.{ Integer }
+ RequestSetBrightness.BrightnessLevel
+ RequestSetBrightnessPercent.Integer
  RequestStartBrightnessRamp.{ BrightnessLevel RampDuration }
  RequestStartBrightnessRampPercent.{ Integer RampDuration }
- Reply.[ Accepted Theme.ReplyTheme Warmth.ReplyWarmth Brightness.ReplyBrightness State.ReplyState SolarClock.ReplySolarClock SolarClockUnavailable Error.ReplyError ]
- ReplyTheme.{ ThemeMode }
- ReplyWarmth.{ Integer }
- ReplyBrightness.{ Integer }
+ Reply.[ Accepted Theme.ThemeMode Warmth.Integer Brightness.Integer State.ReplyState SolarClock.ReplySolarClock SolarClockUnavailable Error.String ]
+ ReplyTheme.ThemeMode
+ ReplyWarmth.Integer
+ ReplyBrightness.Integer
  ReplyState.{ ThemeMode Integer Integer }
  ReplySolarClock.{ Integer Integer }
- ReplyError.{ Text }
+ ReplyError.String
  ThemeMode.[ Dark Light ]
  WarmthLevel.[ Cold Cool Neutral Warm Warmer Warmest ]
  BrightnessLevel.[ Dim Dimmer Mid Bright Brighter Brightest ]
  RampDuration.[ Minutes.Integer Seconds.Integer ]
  Config.{ ThemeAxis WarmthAxis BrightnessAxis }
- ThemeAxis.{ Vector<ThemeConcern> ThemePalettes Option<Text> Option<Integer> Option<GhosttyConfigTemplates> Option<PiThemeControl> ThemeSchedule }
+ ThemeAxis.{ Vector<ThemeConcern> ThemePalettes Option<String> Option<Integer> Option<GhosttyConfigTemplates> Option<PiThemeControl> ThemeSchedule }
  ThemeConcern.[ Terminal Desktop Ghostty Pi ]
  ThemePalettes.{ ThemePalette ThemePalette }
- ThemePalette.{ Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text }
- GhosttyConfigTemplates.{ Text Text }
+ ThemePalette.{ String String String String String String String String String String String String String String String String }
+ GhosttyConfigTemplates.{ String String }
  PiThemeControl.{ PiThemeControlRegistryDirectory Option<Integer> Option<Integer> }
- PiThemeControlRegistryDirectory.[ RuntimeRelative.Text Absolute.Text ]
+ PiThemeControlRegistryDirectory.[ RuntimeRelative.String Absolute.String ]
  ThemeSchedule.[ Manual.ThemeMode Scheduled.ThemeScheduleScheduled ]
  ThemeScheduleScheduled.{ Vector<ThemeWaypoint> ThemeMode }
  ThemeWaypoint.{ RampTrigger ThemeMode }
- WarmthAxis.{ WarmthSchedule }
+ WarmthAxis.WarmthSchedule
  WarmthSchedule.[ Manual.WarmthLevel Scheduled.WarmthScheduleScheduled ]
  WarmthScheduleScheduled.{ Vector<WarmthWaypoint> WarmthLevel }
  WarmthWaypoint.{ RampTrigger WarmthLevel RampDuration }
- BrightnessAxis.{ BrightnessSchedule }
+ BrightnessAxis.BrightnessSchedule
  BrightnessSchedule.[ Manual.BrightnessLevel Scheduled.BrightnessScheduleScheduled ]
  BrightnessScheduleScheduled.{ Vector<BrightnessWaypoint> BrightnessLevel }
  BrightnessWaypoint.{ RampTrigger BrightnessLevel RampDuration }
  RampTrigger.[ Sunrise.Integer Sunset.Integer CivilDawn.Integer CivilDusk.Integer TimeOfDay.RampTriggerTimeOfDay ]
  RampTriggerTimeOfDay.{ Integer Integer }
 ]
+[]
 []

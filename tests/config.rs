@@ -1,54 +1,26 @@
 //! Chroma config is embodied by the generated Datom anatomy, then validated by runtime policy.
 
 use chroma::{BrightnessLevel, ConfigFile, ThemeConcern, ThemeMode, WarmthLevel};
-use datom_codec::Textualizable;
+use datom_codec::Datomizable;
+use protos::{Protosizable, Textualizable};
 
-fn string(value: &str) -> protos::Text {
-    value.to_owned().try_into().expect("representable Datom string")
+fn string(value: &str) -> String {
+    value.to_owned()
 }
 
 fn palette() -> chroma::generated::ThemePalette {
-    chroma::generated::ThemePalette(
-        string("#000000"),
-        string("#111111"),
-        string("#222222"),
-        string("#333333"),
-        string("#444444"),
-        string("#555555"),
-        string("#666666"),
-        string("#777777"),
-        string("#888888"),
-        string("#999999"),
-        string("#aaaaaa"),
-        string("#bbbbbb"),
-        string("#cccccc"),
-        string("#dddddd"),
-        string("#eeeeee"),
-        string("#ffffff"),
-    )
+    chroma::generated::ThemePalette { first_string: string("#000000"), second_string: string("#111111"), third_string: string("#222222"), fourth_string: string("#333333"), fifth_string: string("#444444"), sixth_string: string("#555555"), seventh_string: string("#666666"), eighth_string: string("#777777"), ninth_string: string("#888888"), tenth_string: string("#999999"), position_11_string: string("#aaaaaa"), position_12_string: string("#bbbbbb"), position_13_string: string("#cccccc"), position_14_string: string("#dddddd"), position_15_string: string("#eeeeee"), position_16_string: string("#ffffff") }
 }
 
 fn config() -> chroma::generated::Config {
     use chroma::generated as data;
-    chroma::generated::Config(
-        data::ThemeAxis(
-            vec![data::ThemeConcern::Terminal],
-            data::ThemePalettes(palette(), palette()),
-            None,
-            None,
-            None,
-            None,
-            data::ThemeSchedule::Manual(data::ThemeMode::Dark),
-        ),
-        data::WarmthAxis(data::WarmthSchedule::Manual(data::WarmthLevel::Neutral)),
-        data::BrightnessAxis(data::BrightnessSchedule::Manual(data::BrightnessLevel::Bright)),
-    )
+    chroma::generated::Config { theme_axis: data::ThemeAxis { theme_concern_vector: vec![data::ThemeConcern::Terminal], theme_palettes: data::ThemePalettes { first_theme_palette: palette(), second_theme_palette: palette() }, string_option: None, integer_option: None, ghostty_config_templates_option: None, pi_theme_control_option: None, theme_schedule: data::ThemeSchedule::Manual(data::ThemeMode::Dark) }, warmth_axis: data::WarmthSchedule::Manual(data::WarmthLevel::Neutral), brightness_axis: data::BrightnessSchedule::Manual(data::BrightnessLevel::Bright) }
 }
 
 fn fixture() -> (tempfile::TempDir, ConfigFile) {
     let directory = tempfile::tempdir().expect("create config fixture");
     let path = directory.path().join("config.datom");
-    std::fs::write(&path, config().textualize()).expect("write Datom fixture");
+    std::fs::write(&path, config().datomize(vec![]).protosize().textualize()).expect("write Datom fixture");
     (directory, ConfigFile::from_path(path))
 }
 

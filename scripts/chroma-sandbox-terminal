@@ -316,12 +316,12 @@ await_socket "$CHROMA_SOCKET"
 
 chroma 'GetState' > "$artifact_root/get-state-before.datom"
 
-chroma 'SetTheme.{Light}' > "$artifact_root/set-theme-light.datom"
+chroma 'SetTheme.Light' > "$artifact_root/set-theme-light.datom"
 await_ghostty_background "#faf5f0"
 await_ghostty_reload_count 1
 cp "$XDG_CONFIG_HOME/ghostty/config.ghostty" "$artifact_root/ghostty-light.config"
 
-chroma 'SetTheme.{Light}' > "$artifact_root/set-theme-light-unchanged.datom"
+chroma 'SetTheme.Light' > "$artifact_root/set-theme-light-unchanged.datom"
 chroma-set-dark-theme > "$artifact_root/set-theme-dark.datom"
 await_ghostty_background "#000000"
 await_ghostty_reload_count 2
@@ -329,11 +329,11 @@ cp "$XDG_CONFIG_HOME/ghostty/config.ghostty" "$artifact_root/ghostty-dark.config
 
 case "${CHROMA_SANDBOX_VISIBLE_THEME:-Dark}" in
   Light)
-    chroma 'SetTheme.{Light}' > "$artifact_root/set-visible-theme.datom"
+    chroma 'SetTheme.Light' > "$artifact_root/set-visible-theme.datom"
     await_ghostty_background "#faf5f0"
     ;;
   Dark)
-    chroma 'SetTheme.{Dark}' > "$artifact_root/set-visible-theme.datom"
+    chroma 'SetTheme.Dark' > "$artifact_root/set-visible-theme.datom"
     await_ghostty_background "#000000"
     ;;
   *)

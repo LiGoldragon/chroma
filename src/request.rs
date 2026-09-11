@@ -74,13 +74,13 @@ impl TryFrom<generated::Request> for Request {
             DataBrightness::Brighter => BrightnessLevel::Brighter,
             DataBrightness::Brightest => BrightnessLevel::Brightest,
         };
-        let kelvin = |value: protos::Integer| {
+        let kelvin = |value: i64| {
             let value = i64::from(value);
             u16::try_from(value).map(KelvinTemperature::new).map_err(|_| Error::Config {
                 message: format!("kelvin must be a non-negative 16-bit integer, got {value}"),
             })
         };
-        let percent = |value: protos::Integer| {
+        let percent = |value: i64| {
             let value = i64::from(value);
             u8::try_from(value).map(BrightnessPercent::new).map_err(|_| Error::Config {
                 message: format!("brightness percent must be a non-negative 8-bit integer, got {value}"),
@@ -99,37 +99,31 @@ impl TryFrom<generated::Request> for Request {
         };
 
         Ok(match request {
-            generated::Request::SetTheme(generated::RequestSetTheme(mode)) => Self::SetTheme { mode: theme(mode) },
+            generated::Request::SetTheme(mode) => Self::SetTheme { mode: theme(mode) },
             generated::Request::GetTheme => Self::GetTheme,
-            generated::Request::SetWarmth(generated::RequestSetWarmth(level)) => {
+            generated::Request::SetWarmth(level) => {
                 Self::SetWarmth { level: warmth(level) }
             }
-            generated::Request::SetWarmthKelvin(generated::RequestSetWarmthKelvin(value)) => {
+            generated::Request::SetWarmthKelvin(value) => {
                 Self::SetWarmthKelvin { kelvin: kelvin(value)? }
             }
             generated::Request::GetWarmth => Self::GetWarmth,
-            generated::Request::StartWarmthRamp(generated::RequestStartWarmthRamp(target, ramp_duration)) => {
+            generated::Request::StartWarmthRamp(generated::RequestStartWarmthRamp { warmth_level: target, ramp_duration }) => {
                 Self::StartWarmthRamp { target: warmth(target), duration: duration(ramp_duration)? }
             }
-            generated::Request::StartWarmthRampKelvin(generated::RequestStartWarmthRampKelvin(
-                target,
-                ramp_duration,
-            )) => Self::StartWarmthRampKelvin { target: kelvin(target)?, duration: duration(ramp_duration)? },
+            generated::Request::StartWarmthRampKelvin(generated::RequestStartWarmthRampKelvin { integer: target, ramp_duration }) => Self::StartWarmthRampKelvin { target: kelvin(target)?, duration: duration(ramp_duration)? },
             generated::Request::InterruptWarmth => Self::InterruptWarmth,
-            generated::Request::SetBrightness(generated::RequestSetBrightness(level)) => {
+            generated::Request::SetBrightness(level) => {
                 Self::SetBrightness { level: brightness(level) }
             }
-            generated::Request::SetBrightnessPercent(generated::RequestSetBrightnessPercent(value)) => {
+            generated::Request::SetBrightnessPercent(value) => {
                 Self::SetBrightnessPercent { percent: percent(value)? }
             }
             generated::Request::GetBrightness => Self::GetBrightness,
-            generated::Request::StartBrightnessRamp(generated::RequestStartBrightnessRamp(target, ramp_duration)) => {
+            generated::Request::StartBrightnessRamp(generated::RequestStartBrightnessRamp { brightness_level: target, ramp_duration }) => {
                 Self::StartBrightnessRamp { target: brightness(target), duration: duration(ramp_duration)? }
             }
-            generated::Request::StartBrightnessRampPercent(generated::RequestStartBrightnessRampPercent(
-                target,
-                ramp_duration,
-            )) => Self::StartBrightnessRampPercent { target: percent(target)?, duration: duration(ramp_duration)? },
+            generated::Request::StartBrightnessRampPercent(generated::RequestStartBrightnessRampPercent { integer: target, ramp_duration }) => Self::StartBrightnessRampPercent { target: percent(target)?, duration: duration(ramp_duration)? },
             generated::Request::InterruptBrightness => Self::InterruptBrightness,
             generated::Request::GetState => Self::GetState,
             generated::Request::GetSolarClock => Self::GetSolarClock,

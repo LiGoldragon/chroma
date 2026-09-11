@@ -1,22 +1,16 @@
 //! Chroma's public data anatomies are authored in Ethos.
 
-use datom_codec::{Actualizable, IncorporationBudget, Potential, Textualizable};
+use datom_codec::{Actualizing, Budget, Datomizable, Potential};
 use ethos_zero::Generating;
-use protos::Potential as ProtosPotential;
-use std::{fs, process::Command};
+use ethos_zero::{Actualizing as _, File, Potential as EthosPotential};
+use protos::{Protosizable, Textualizable};
+use std::fs;
 
-use chroma::generated::{Request, RequestSetTheme, ThemeMode};
+use chroma::generated::{Request, ThemeMode};
 
 fn regenerated_rust() -> String {
     let source = fs::read_to_string("chroma.ethos").expect("read Chroma Ethos map");
-    let file = ProtosPotential::<ethos_zero::File>::from(source.as_str()).actualize(()).expect("read Chroma Ethos map");
-    let rust = file.generate().expect("generate Chroma Datom library");
-    let directory = tempfile::tempdir().expect("create formatting directory");
-    let path = directory.path().join("generated.rs");
-    fs::copy("rustfmt.toml", directory.path().join("rustfmt.toml")).expect("copy Chroma rustfmt configuration");
-    fs::write(&path, rust).expect("write generated Rust for formatting");
-    assert!(Command::new("rustfmt").args(["--edition", "2024"]).arg(&path).status().expect("run rustfmt").success());
-    fs::read_to_string(path).expect("read formatted generated Rust")
+    EthosPotential::<File>::from(source.as_str()).actualize().expect("read Chroma Ethos map").generate().expect("generate Chroma Datom library")
 }
 
 #[test]
@@ -26,10 +20,12 @@ fn committed_generated_rust_matches_the_authored_ethos_projection() {
 
 #[test]
 fn generated_request_keeps_the_datom_boundary_in_one_anatomy() {
-    let request = Potential::<Request>::from("SetTheme.{Light}")
-        .actualize(IncorporationBudget::try_from(4096).expect("positive request budget"))
+    let mut request = Potential::<Request>::from("SetTheme.Light");
+    let mut budget = Budget { remaining: 4096, reader: protos::ReaderBudget { remaining: 4096 }, depth: 0, maximum_depth: 4096 };
+    let request = request
+        .actualize(&mut budget)
         .expect("incorporate Datom request");
 
-    assert!(matches!(request, Request::SetTheme(RequestSetTheme(ThemeMode::Light))));
-    assert_eq!(request.textualize(), "SetTheme.{ Light }");
+    assert!(matches!(request, Request::SetTheme(ThemeMode::Light)));
+    assert_eq!(request.datomize(vec![]).protosize().textualize(), "SetTheme.Light");
 }

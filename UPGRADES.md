@@ -1,5 +1,13 @@
 # Upgrades
 
+## 0.5.0 — direct single-value Datom payloads
+
+Chroma's one-value request and reply wrappers are aliases in the Ethos
+contract. Use direct payloads such as `SetTheme.Light` and
+`SetWarmthKelvin.3500`; configurations put warmth and brightness schedules
+directly in their top-level positions. The old braced wrapper values are no
+longer accepted.
+
 ## 0.4.0 — current typed Datom codec
 
 Chroma now uses `datom-codec`, current Protos, and current Ethos-generated

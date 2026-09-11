@@ -15,7 +15,7 @@ wrapper with a single user-service component:
 - **Persisted state** in redb + rkyv, crash-consistent across
   resume / login / wake.
 - **One CLI** that takes a single Datom record on argv —
-  `chroma 'SetWarmth.{Warm}'` — and signals the daemon over a
+  `chroma 'SetWarmth.Warm'` — and signals the daemon over a
   Unix domain socket using length-prefixed rkyv frames.
 - **Native and resident theme concerns** — Chroma owns terminal,
   desktop, Ghostty, and Pi application as independent concern
