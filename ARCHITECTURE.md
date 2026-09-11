@@ -148,8 +148,8 @@ runtime validates that generated value into typed `Config`:
 {{[Terminal Desktop] {{#000000 … #ff5577} {#faf5f0 … #cc3355}}
   Some.“/run/current-system/sw/bin/dconf” None None None
   Scheduled.{{Sunrise.-30 Light} {Sunset.30 Dark} Dark}}
- {Scheduled.{{TimeOfDay.{7 0} Neutral Minutes.30} Neutral}}
- {Manual.Bright}}
+ Scheduled.{{TimeOfDay.{7 0} Neutral Minutes.30} Neutral}
+ Manual.Bright}
 ```
 
 Each schedule is `Manual.<level>` or `Scheduled.{<waypoints> <default>}`.
