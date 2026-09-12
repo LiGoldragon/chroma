@@ -411,10 +411,12 @@ mod owner_watcher_tests {
 /// command run it inside `dbus-run-session`.
 #[cfg(test)]
 mod private_session_bus_tests {
+    use std::sync::{Arc, Mutex};
+
     use super::*;
     use crate::brightness::{BrightnessAxis, BrightnessLevel, BrightnessSchedule};
     use crate::config::Config;
-    use crate::daemon::{BeginSchedule, ChromaRoot};
+    use crate::daemon::{ChromaRoot, ResumeFromSleep};
     use crate::state::{RecordTheme, StateStore, StoredThemeState};
     use crate::theme::{ThemeAdapters, ThemeAxis, ThemePalette, ThemePalettes, ThemeSchedule};
     use crate::warmth::{WarmthAxis, WarmthLevel, WarmthSchedule};
@@ -422,7 +424,9 @@ mod private_session_bus_tests {
     use kameo::actor::Spawn;
     use zbus::Connection;
 
-    struct FakeGamma;
+    struct FakeGamma {
+        brightness: Arc<Mutex<f64>>,
+    }
 
     #[zbus::interface(name = "rs.wl.gammarelay")]
     impl FakeGamma {
@@ -432,8 +436,16 @@ mod private_session_bus_tests {
         }
 
         #[zbus(property)]
+        fn set_temperature(&self, _value: u16) {}
+
+        #[zbus(property)]
         fn brightness(&self) -> f64 {
-            1.0
+            *self.brightness.lock().expect("read fake gamma brightness")
+        }
+
+        #[zbus(property)]
+        fn set_brightness(&self, value: f64) {
+            *self.brightness.lock().expect("write fake gamma brightness") = value;
         }
     }
 
@@ -457,12 +469,27 @@ mod private_session_bus_tests {
         }
     }
 
+    async fn await_brightness(brightness: &Mutex<f64>, expected: f64) {
+        for _ in 0..100 {
+            if (*brightness.lock().expect("read fake gamma brightness") - expected).abs() < f64::EPSILON {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(*brightness.lock().expect("read timed-out fake gamma brightness"), expected);
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "run under dbus-run-session; this is the private durable bus witness"]
     async fn actual_theme_dbus_service_binds_the_real_protocol_to_unique_bus_owners() {
         let gamma = Connection::session().await.expect("private bus is required");
         gamma.request_name("rs.wl-gammarelay").await.expect("own fake gamma name");
-        gamma.object_server().at("/", FakeGamma).await.expect("export fake gamma");
+        let gamma_brightness = Arc::new(Mutex::new(1.0));
+        gamma
+            .object_server()
+            .at("/", FakeGamma { brightness: Arc::clone(&gamma_brightness) })
+            .await
+            .expect("export fake gamma");
 
         let directory = tempfile::tempdir().expect("temporary redb directory");
         let state =
@@ -475,7 +502,10 @@ mod private_session_bus_tests {
         let root = ChromaRoot::start_with_state_store(config(ThemeMode::Light), state)
             .await
             .expect("restart actual chroma root from durable state");
-        root.ask(BeginSchedule).await.expect("run daemon startup reconciliation");
+        *gamma_brightness.lock().expect("seed applied brightness before suspend") = 0.85;
+        *gamma_brightness.lock().expect("simulate display backend reset") = 1.0;
+        root.ask(ResumeFromSleep).await.expect("reconcile after display backend resumes");
+        await_brightness(&gamma_brightness, 0.85).await;
         let service = ThemeDbusService::start(root.clone()).await.expect("register actual Chroma service");
 
         let client = Connection::session().await.expect("connect first client");

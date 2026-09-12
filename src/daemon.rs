@@ -228,6 +228,16 @@ impl ChromaRoot {
         self.brightness_applier.tell(message).await.map_err(|error| Error::ActorCall { message: error.to_string() })
     }
 
+    async fn reapply_current_state(&self) -> Result<()> {
+        self.enqueue_theme(self.theme).await?;
+        if let Some(warmth) = self.warmth
+            && !warmth.is_transitioning()
+        {
+            self.enqueue_warmth(WarmthApplication::Set { kelvin: warmth.desired_kelvin() }).await?;
+        }
+        self.enqueue_brightness(BrightnessApplication::Set { percent: self.brightness }).await
+    }
+
     async fn set_theme(&mut self, mode: ThemeMode) -> Result<Response> {
         if let Some(revision) = next_theme_revision(self.theme_revision, mode != self.theme)? {
             // Refuse before persistence, native application, or signal
@@ -491,14 +501,7 @@ impl Message<ReapplyCurrentState> for ChromaRoot {
         _message: ReapplyCurrentState,
         _context: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.enqueue_theme(self.theme).await?;
-        if let Some(warmth) = self.warmth
-            && !warmth.is_transitioning()
-        {
-            self.enqueue_warmth(WarmthApplication::Set { kelvin: warmth.desired_kelvin() }).await?;
-        }
-        self.enqueue_brightness(BrightnessApplication::Set { percent: self.brightness }).await?;
-        Ok(())
+        self.reapply_current_state().await
     }
 }
 
@@ -651,12 +654,15 @@ impl Message<ProjectionOwnerDisappeared> for ChromaRoot {
     }
 }
 
-struct ResumeFromSleep;
+pub(crate) struct ResumeFromSleep;
 
 impl Message<ResumeFromSleep> for ChromaRoot {
     type Reply = ();
 
     async fn handle(&mut self, _message: ResumeFromSleep, _context: &mut Context<Self, Self::Reply>) {
+        if let Err(error) = self.reapply_current_state().await {
+            eprintln!("chroma-daemon resume state reapply error: {error}");
+        }
         let Some(schedule_engine) = self.schedule_engine.as_ref() else {
             eprintln!("chroma-daemon resume ignored because schedule engine is not installed");
             return;
