@@ -1,6 +1,6 @@
 #![allow(dead_code, non_camel_case_types, non_snake_case)]
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Request {
     SetTheme(ThemeMode),
     GetTheme,
@@ -26,13 +26,13 @@ pub type RequestSetWarmth = WarmthLevel;
 #[rustfmt::skip]
 pub type RequestSetWarmthKelvin = i64;
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RequestStartWarmthRamp {
     pub warmth_level: WarmthLevel,
     pub ramp_duration: RampDuration,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RequestStartWarmthRampKelvin {
     pub integer: i64,
     pub ramp_duration: RampDuration,
@@ -42,19 +42,19 @@ pub type RequestSetBrightness = BrightnessLevel;
 #[rustfmt::skip]
 pub type RequestSetBrightnessPercent = i64;
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RequestStartBrightnessRamp {
     pub brightness_level: BrightnessLevel,
     pub ramp_duration: RampDuration,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RequestStartBrightnessRampPercent {
     pub integer: i64,
     pub ramp_duration: RampDuration,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Reply {
     Accepted,
     Theme(ThemeMode),
@@ -72,14 +72,14 @@ pub type ReplyWarmth = i64;
 #[rustfmt::skip]
 pub type ReplyBrightness = i64;
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ReplyState {
     pub theme_mode: ThemeMode,
     pub first_integer: i64,
     pub second_integer: i64,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ReplySolarClock {
     pub first_integer: i64,
     pub second_integer: i64,
@@ -87,13 +87,13 @@ pub struct ReplySolarClock {
 #[rustfmt::skip]
 pub type ReplyError = String;
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ThemeMode {
     Dark,
     Light,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum WarmthLevel {
     Cold,
     Cool,
@@ -103,7 +103,7 @@ pub enum WarmthLevel {
     Warmest,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BrightnessLevel {
     Dim,
     Dimmer,
@@ -113,20 +113,20 @@ pub enum BrightnessLevel {
     Brightest,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RampDuration {
     Minutes(i64),
     Seconds(i64),
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Config {
     pub theme_axis: ThemeAxis,
     pub warmth_axis: WarmthAxis,
     pub brightness_axis: BrightnessAxis,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ThemeAxis {
     pub theme_concern_vector: std::vec::Vec<ThemeConcern>,
     pub theme_palettes: ThemePalettes,
@@ -137,7 +137,7 @@ pub struct ThemeAxis {
     pub theme_schedule: ThemeSchedule,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ThemeConcern {
     Terminal,
     Desktop,
@@ -145,13 +145,13 @@ pub enum ThemeConcern {
     Pi,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ThemePalettes {
     pub first_theme_palette: ThemePalette,
     pub second_theme_palette: ThemePalette,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ThemePalette {
     pub first_string: String,
     pub second_string: String,
@@ -171,38 +171,38 @@ pub struct ThemePalette {
     pub position_16_string: String,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct GhosttyConfigTemplates {
     pub first_string: String,
     pub second_string: String,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PiThemeControl {
     pub pi_theme_control_registry_directory: PiThemeControlRegistryDirectory,
     pub first_integer_option: Option<i64>,
     pub second_integer_option: Option<i64>,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PiThemeControlRegistryDirectory {
     RuntimeRelative(String),
     Absolute(String),
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ThemeSchedule {
     Manual(ThemeMode),
     Scheduled(ThemeScheduleScheduled),
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ThemeScheduleScheduled {
     pub theme_waypoint_vector: std::vec::Vec<ThemeWaypoint>,
     pub theme_mode: ThemeMode,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ThemeWaypoint {
     pub ramp_trigger: RampTrigger,
     pub theme_mode: ThemeMode,
@@ -210,19 +210,19 @@ pub struct ThemeWaypoint {
 #[rustfmt::skip]
 pub type WarmthAxis = WarmthSchedule;
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum WarmthSchedule {
     Manual(WarmthLevel),
     Scheduled(WarmthScheduleScheduled),
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WarmthScheduleScheduled {
     pub warmth_waypoint_vector: std::vec::Vec<WarmthWaypoint>,
     pub warmth_level: WarmthLevel,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WarmthWaypoint {
     pub ramp_trigger: RampTrigger,
     pub warmth_level: WarmthLevel,
@@ -231,26 +231,26 @@ pub struct WarmthWaypoint {
 #[rustfmt::skip]
 pub type BrightnessAxis = BrightnessSchedule;
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BrightnessSchedule {
     Manual(BrightnessLevel),
     Scheduled(BrightnessScheduleScheduled),
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BrightnessScheduleScheduled {
     pub brightness_waypoint_vector: std::vec::Vec<BrightnessWaypoint>,
     pub brightness_level: BrightnessLevel,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BrightnessWaypoint {
     pub ramp_trigger: RampTrigger,
     pub brightness_level: BrightnessLevel,
     pub ramp_duration: RampDuration,
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RampTrigger {
     Sunrise(i64),
     Sunset(i64),
@@ -259,7 +259,7 @@ pub enum RampTrigger {
     TimeOfDay(RampTriggerTimeOfDay),
 }
 #[rustfmt::skip]
-#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq)]
+#[derive(datom_codec::Datomizable, datom_codec::Composing, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RampTriggerTimeOfDay {
     pub first_integer: i64,
     pub second_integer: i64,

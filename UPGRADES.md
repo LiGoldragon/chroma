@@ -1,5 +1,27 @@
 # Upgrades
 
+## 0.7.0 — ethos-zero 10.0.0 adds Eq and Hash to every generated derive
+
+`ethos-zero` 10.0.0 widens the derive set every generated Ethos type carries
+to include `Eq` and `Hash` alongside `Clone`, `Debug`, and `PartialEq`.
+Regenerating `src/generated.rs` from the unchanged `chroma.ethos` source
+therefore changes every derive line in the committed module. Because
+`generated` is a public module, this is a breaking change to Chroma's own
+generated surface, not a pure repin.
+
+Repinned to `protos` 0.31.0, `datom-codec` 0.31.0, and `ethos-zero` 10.0.0.
+`datom-codec` 0.31.0 removes every datom kind from `f64`; Chroma's Ethos
+contract declares no `Decimal` and `src/generated.rs` carries no `f64`, so
+this repin needed no codec-side conversion. Chroma's own `f64` sites (gamma
+brightness, solar time, ramp interpolation, geoclue location) sit outside any
+datom position and are unchanged. `StoredLocation` in `src/state.rs` holds
+two `f64` fields that are rkyv-archived for redb persistence, not a datom
+position, and are left as-is; they can still hold a non-finite value with
+nothing refusing one.
+
+Regenerate `src/generated.rs` the same way as in 0.4.0; `cargo test --test
+ethos_contract` proves the committed module matches the authored source.
+
 ## 0.6.0 — Composing replaces Compositional in generated Rust
 
 `datom-codec` 0.27.0 gives arity back to `Compositional` — it now carries

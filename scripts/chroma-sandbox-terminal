@@ -29,6 +29,13 @@ launch_terminal=true
 visible_theme="Dark"
 artifact_root="${CHROMA_SANDBOX_ARTIFACT_ROOT:-}"
 
+# A backstop against a genuinely hung daemon or fake service, not a
+# performance assertion about how fast a healthy one must react — every
+# await_* below is driven by inotifywait blocking on the tested event and
+# returns the moment that event is observed, however long that takes under a
+# loaded builder.
+HANG_BACKSTOP_SECONDS=90
+
 fail() {
   echo "chroma sandbox failed: $*" >&2
   exit 1
@@ -264,7 +271,12 @@ await_ready_file() {
 await_ghostty_background() {
   local expected_background="$1"
   local config_file="$XDG_CONFIG_HOME/ghostty/config.ghostty"
-  local deadline=$((SECONDS + 15))
+  # The bound below is a hang backstop for a daemon that never reacts at all,
+  # not a performance assertion about how fast it must react: the loop is
+  # driven by inotifywait blocking on the tested event (the config file
+  # actually reaching the expected background), and returns the moment that
+  # event is observed, however long it takes under a loaded builder.
+  local deadline=$((SECONDS + HANG_BACKSTOP_SECONDS))
   local remaining
 
   while ((SECONDS < deadline)); do
@@ -275,7 +287,7 @@ await_ghostty_background() {
     inotifywait -q -t "$remaining" -e create -e modify -e close_write "$XDG_CONFIG_HOME/ghostty" >/dev/null || true
   done
 
-  fail "ghostty config did not reach background $expected_background"
+  fail "ghostty config did not reach background $expected_background within the ${HANG_BACKSTOP_SECONDS}s hang backstop"
 }
 
 ghostty_reload_count() {
@@ -285,7 +297,10 @@ ghostty_reload_count() {
 
 await_ghostty_reload_after() {
   local baseline="$1"
-  local deadline=$((SECONDS + 15))
+  # Same hang backstop as await_ghostty_background above, not a performance
+  # assertion: the loop returns as soon as the tested event (a new reload
+  # call recorded in the fake Ghostty's call log) is observed.
+  local deadline=$((SECONDS + HANG_BACKSTOP_SECONDS))
   local remaining
   local observed_count
 
