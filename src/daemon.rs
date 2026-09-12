@@ -50,6 +50,10 @@ use crate::wire::{read_frame, socket_path, write_frame};
 // long enough to receive the provider's next physical fix instead of repeatedly
 // consuming and discarding the same cached LocationUpdated value.
 const GEOCLUE_REQUEST_TIMEOUT: Duration = Duration::from_secs(135);
+// GeoClue's public GClueAccuracyLevel enum assigns 8 to Exact. Requesting
+// Country (1) makes the static source add a privacy margin, turning an exact
+// 1 km configured fix into a 4 km result that Chroma must reject.
+const GEOCLUE_ACCURACY_LEVEL_EXACT: u32 = 8;
 const POST_RESUME_LOCATION_REFRESH_DELAY: Duration = Duration::from_secs(5);
 // A stale GeoClue cache may outlive an otherwise valid held location. Retry
 // well inside the renewal margin while retaining that held fix until expiry.
@@ -1389,6 +1393,12 @@ impl GeoclueLocator {
         self.await_location_update().await
     }
 
+    async fn configure_client(client: &zbus::Proxy<'_>) -> Result<()> {
+        client.set_property("DesktopId", "chroma").await?;
+        client.set_property("RequestedAccuracyLevel", GEOCLUE_ACCURACY_LEVEL_EXACT).await?;
+        Ok(())
+    }
+
     async fn await_location_update(&self) -> Result<FreshGeoclueLocation> {
         let manager = zbus::Proxy::new(
             &self.connection,
@@ -1405,8 +1415,7 @@ impl GeoclueLocator {
             "org.freedesktop.GeoClue2.Client",
         )
         .await?;
-        client.set_property("DesktopId", "chroma").await?;
-        client.set_property("RequestedAccuracyLevel", 1_u32).await?;
+        Self::configure_client(&client).await?;
 
         let updates = client.receive_signal("LocationUpdated").await?.map(|message| {
             message
@@ -1458,5 +1467,72 @@ impl GeoclueLocator {
         .await;
         let _: std::result::Result<(), zbus::Error> = client.call("Stop", &()).await;
         result
+    }
+}
+
+#[cfg(test)]
+mod geoclue_client_dbus_tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use super::GeoclueLocator;
+    use zbus::Connection;
+
+    struct FakeGeoclueClient {
+        requested_accuracy_level: Arc<AtomicU32>,
+    }
+
+    #[zbus::interface(name = "org.freedesktop.GeoClue2.Client")]
+    impl FakeGeoclueClient {
+        #[zbus(property)]
+        fn desktop_id(&self) -> &str {
+            "chroma"
+        }
+
+        #[zbus(property)]
+        fn set_desktop_id(&self, _value: &str) {}
+
+        #[zbus(property)]
+        fn requested_accuracy_level(&self) -> u32 {
+            self.requested_accuracy_level.load(Ordering::SeqCst)
+        }
+
+        #[zbus(property)]
+        fn set_requested_accuracy_level(&self, value: u32) {
+            self.requested_accuracy_level.store(value, Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "run under dbus-run-session; this captures Chroma's real GeoClue client property request"]
+    async fn geoclue_client_requests_exact_accuracy_over_dbus() {
+        let service = Connection::session().await.expect("private bus is required");
+        service.request_name("org.freedesktop.GeoClue2").await.expect("own fake GeoClue name");
+        let requested_accuracy_level = Arc::new(AtomicU32::new(0));
+        service
+            .object_server()
+            .at(
+                "/org/freedesktop/GeoClue2/Client/test",
+                FakeGeoclueClient { requested_accuracy_level: Arc::clone(&requested_accuracy_level) },
+            )
+            .await
+            .expect("export fake GeoClue client");
+
+        let connection = Connection::session().await.expect("connect Chroma client");
+        let client = zbus::Proxy::new(
+            &connection,
+            "org.freedesktop.GeoClue2",
+            "/org/freedesktop/GeoClue2/Client/test",
+            "org.freedesktop.GeoClue2.Client",
+        )
+        .await
+        .expect("bind fake GeoClue client");
+        GeoclueLocator::configure_client(&client).await.expect("configure GeoClue client");
+
+        assert_eq!(
+            requested_accuracy_level.load(Ordering::SeqCst),
+            8,
+            "GeoClue's exact accuracy level must be requested"
+        );
     }
 }

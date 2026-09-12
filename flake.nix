@@ -94,8 +94,7 @@
           checkPhase = ''
             runHook preCheck
             dbus-run-session --config-file ${pkgs.dbus}/share/dbus-1/session.conf -- \
-              cargo test --release --locked --lib \
-              actual_theme_dbus_service_binds_the_real_protocol_to_unique_bus_owners -- --ignored
+              cargo test --release --locked --lib -- --ignored
             runHook postCheck
           '';
         });

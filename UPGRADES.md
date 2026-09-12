@@ -1,5 +1,13 @@
 # Upgrades
 
+## 0.7.1 — request exact GeoClue accuracy
+
+Chroma now requests GeoClue's `Exact` accuracy level (the public enum value
+8). The former value 1 requested `Country`; GeoClue's static provider added a
+3 km privacy margin to the configured 1 km accuracy and Chroma correctly
+rejected the resulting 4 km fix. The accepted-location ceiling remains 1 km,
+and rejected renewals continue to retain a still-valid precise fix.
+
 ## 0.7.0 — ethos-zero 10.0.0 adds Eq and Hash to every generated derive
 
 `ethos-zero` 10.0.0 widens the derive set every generated Ethos type carries
