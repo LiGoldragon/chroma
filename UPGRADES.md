@@ -1,5 +1,20 @@
 # Upgrades
 
+## 0.6.0 — Composing replaces Compositional in generated Rust
+
+`datom-codec` 0.27.0 gives arity back to `Compositional` — it now carries
+`const ARITY` and `from_positions` and states a positional type's own
+positions — and renames the kind a datom composes into to `Composing`. The
+derive macro chroma's `chroma.ethos` map generates from is renamed to match,
+so every derive in the committed `src/generated.rs` reads
+`datom_codec::Composing` where it previously read `datom_codec::Compositional`.
+Because `generated` is a public module, this is a breaking change to
+Chroma's own generated surface, not a pure repin.
+
+Repinned to `protos` 0.30.1, `datom-codec` 0.27.0, and `ethos-zero` 9.0.0.
+Regenerate `src/generated.rs` the same way as in 0.4.0; `cargo test --test
+ethos_contract` proves the committed module matches the authored source.
+
 ## 0.5.0 — direct single-value Datom payloads
 
 Chroma's one-value request and reply wrappers are aliases in the Ethos

@@ -1,6 +1,6 @@
 [package]
 name         = "chroma"
-version      = "0.5.0"
+version      = "0.6.0"
 edition      = "2024"
 rust-version = "1.89"
 license-file = "LICENSE.md"
@@ -22,11 +22,11 @@ path = "src/bin/chroma_daemon.rs"
 chrono       = { version = "0.4", default-features = false, features = ["clock"] }
 futures-util = "0.3"
 kameo        = { git = "https://github.com/LiGoldragon/kameo.git", branch = "main", default-features = false, features = ["macros", "tracing"] }
-datom-codec  = { git = "https://github.com/LiGoldragon/datom-codec", rev = "99a9e8c9cbdb88650cc2511644b89428c22129e2" }
+datom-codec  = { git = "https://github.com/LiGoldragon/datom-codec", rev = "6dccc76b75918a91d3370a9d4fe88aa7dd567876" }
 notify       = "5.2"
 redb         = "2.6.3"
 rkyv         = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
-protos       = { git = "https://github.com/LiGoldragon/protos", rev = "b543678cfc8609529cea7174eb4af8a64daa54ad" }
+protos       = { git = "https://github.com/LiGoldragon/protos", rev = "171b21f65337983ab624b7b906397a4f1f92c5a3" }
 sunrise      = "3"
 thiserror    = "2"
 tempfile     = "3"
@@ -34,7 +34,7 @@ tokio        = { version = "1", features = ["rt-multi-thread", "macros", "net", 
 zbus         = { version = "5", default-features = false, features = ["tokio"] }
 
 [dev-dependencies]
-ethos-zero = { git = "https://github.com/LiGoldragon/ethos-zero", rev = "4695ee0c1f5d00dcf5cceba08f5fa00412b92184" }
+ethos-zero = { git = "https://github.com/LiGoldragon/ethos-zero", rev = "b232d35e03011161fe7ec9129ad99a9914413348" }
 
 [patch.crates-io]
 kameo = { git = "https://github.com/LiGoldragon/kameo.git", branch = "main" }
