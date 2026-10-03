@@ -116,7 +116,7 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "chroma"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "datom-codec",
@@ -168,8 +168,8 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
 name = "datom-codec"
-version = "0.31.0"
-source = "git+https://github.com/LiGoldragon/datom-codec?rev=09e2a9d52bf7f2f11e51d15cb6c3177f72c6c927#09e2a9d52bf7f2f11e51d15cb6c3177f72c6c927"
+version = "0.32.2"
+source = "git+https://github.com/LiGoldragon/datom-codec?rev=4dff16b4f7412febc3b71aac8b49680cd20988cb#4dff16b4f7412febc3b71aac8b49680cd20988cb"
 dependencies = [
  "datom-codec-derive",
  "protos",
@@ -178,8 +178,8 @@ dependencies = [
 
 [[package]]
 name = "datom-codec-derive"
-version = "0.31.0"
-source = "git+https://github.com/LiGoldragon/datom-codec?rev=09e2a9d52bf7f2f11e51d15cb6c3177f72c6c927#09e2a9d52bf7f2f11e51d15cb6c3177f72c6c927"
+version = "0.32.0"
+source = "git+https://github.com/LiGoldragon/datom-codec?rev=4dff16b4f7412febc3b71aac8b49680cd20988cb#4dff16b4f7412febc3b71aac8b49680cd20988cb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -243,8 +243,8 @@ dependencies = [
 
 [[package]]
 name = "ethos-zero"
-version = "10.0.0"
-source = "git+https://github.com/LiGoldragon/ethos-zero?rev=4bf73cae8d4f5a2072c76a11cd2f00aa3fe9f8e3#4bf73cae8d4f5a2072c76a11cd2f00aa3fe9f8e3"
+version = "16.0.0"
+source = "git+https://github.com/LiGoldragon/ethos-zero?rev=c2653dd82adbdb1f1f2f654405c6620e0d06fd58#c2653dd82adbdb1f1f2f654405c6620e0d06fd58"
 dependencies = [
  "datom-codec",
  "prettyplease",
@@ -707,8 +707,11 @@ dependencies = [
 
 [[package]]
 name = "protos"
-version = "0.31.0"
-source = "git+https://github.com/LiGoldragon/protos?rev=1febca7836bf8d5f5973a302fdd50aa9c84c159b#1febca7836bf8d5f5973a302fdd50aa9c84c159b"
+version = "0.32.2"
+source = "git+https://github.com/LiGoldragon/protos?rev=15b41da8f2579e73ead59bc0c2b97529b8ac32d3#15b41da8f2579e73ead59bc0c2b97529b8ac32d3"
+dependencies = [
+ "rkyv",
+]
 
 [[package]]
 name = "ptr_meta"

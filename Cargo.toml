@@ -1,6 +1,6 @@
 [package]
 name         = "chroma"
-version      = "0.7.1"
+version      = "0.8.0"
 edition      = "2024"
 rust-version = "1.89"
 license-file = "LICENSE.md"
@@ -18,15 +18,21 @@ path = "src/bin/chroma.rs"
 name = "chroma-daemon"
 path = "src/bin/chroma_daemon.rs"
 
+[features]
+default = ["datom"]
+# Gates the Datomizable and Composing derives on generated types. The library, CLI and config
+# textualize with Datom in every build, so datom is default and datom-codec stays unconditional.
+datom   = []
+
 [dependencies]
 chrono       = { version = "0.4", default-features = false, features = ["clock"] }
 futures-util = "0.3"
 kameo        = { git = "https://github.com/LiGoldragon/kameo.git", branch = "main", default-features = false, features = ["macros", "tracing"] }
-datom-codec  = { git = "https://github.com/LiGoldragon/datom-codec", rev = "09e2a9d52bf7f2f11e51d15cb6c3177f72c6c927" }
+datom-codec  = { git = "https://github.com/LiGoldragon/datom-codec", rev = "4dff16b4f7412febc3b71aac8b49680cd20988cb", features = ["rkyv"] }
 notify       = "5.2"
 redb         = "2.6.3"
 rkyv         = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
-protos       = { git = "https://github.com/LiGoldragon/protos", rev = "1febca7836bf8d5f5973a302fdd50aa9c84c159b" }
+protos       = { git = "https://github.com/LiGoldragon/protos", rev = "15b41da8f2579e73ead59bc0c2b97529b8ac32d3", features = ["rkyv"] }
 sunrise      = "3"
 thiserror    = "2"
 tempfile     = "3"
@@ -34,7 +40,7 @@ tokio        = { version = "1", features = ["rt-multi-thread", "macros", "net", 
 zbus         = { version = "5", default-features = false, features = ["tokio"] }
 
 [dev-dependencies]
-ethos-zero = { git = "https://github.com/LiGoldragon/ethos-zero", rev = "4bf73cae8d4f5a2072c76a11cd2f00aa3fe9f8e3" }
+ethos-zero = { git = "https://github.com/LiGoldragon/ethos-zero", rev = "c2653dd82adbdb1f1f2f654405c6620e0d06fd58" }
 
 [patch.crates-io]
 kameo = { git = "https://github.com/LiGoldragon/kameo.git", branch = "main" }

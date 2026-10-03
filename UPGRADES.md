@@ -1,5 +1,25 @@
 # Upgrades
 
+## 0.8.0 — ethos-zero 16.0.0: every generated type derives rkyv
+
+`ethos-zero` 16.0.0 makes every generated struct and enum derive rkyv
+`Archive`, `Serialize` and `Deserialize` beside `Clone`, `Debug`, `PartialEq`,
+`Eq` and `Hash`, and puts `Datomizable` and `Composing` behind a `datom`
+feature of the crate that holds the generated Rust. `src/generated.rs` is
+regenerated accordingly, so the generated types of `chroma::generated` now
+carry the rkyv derives and a `cfg_attr(feature = "datom", ...)` line.
+
+Chroma declares `datom` as a default feature: its library, CLI and config
+reader textualize with Datom in every build, so `--no-default-features` is not a
+supported build. Repinned to `ethos-zero` 16.0.0, `protos` 0.32.2 and
+`datom-codec` 0.32.2, both with their `rkyv` feature.
+
+Regenerate `src/generated.rs` as in 0.4.0; `cargo test --test ethos_contract`
+proves the committed module matches the authored source and that a generated
+request archives with rkyv and reads back equal. Deploy by rebuilding the
+package; the wire and redb formats are those of the generated types, so a
+running daemon is restarted with its CLI together.
+
 ## 0.7.1 — request exact GeoClue accuracy
 
 Chroma now requests GeoClue's `Exact` accuracy level (the public enum value

@@ -40,3 +40,14 @@ fn strings_with_structural_separators_round_trip_canonically() {
     let mut budget = Budget { remaining: 4096, reader: protos::ReaderBudget { remaining: 4096 }, depth: 0, maximum_depth: 4096 };
     assert_eq!(value.actualize(&mut budget).expect("read quoted option string"), Some("5::7/128".to_owned()));
 }
+
+#[test]
+fn generated_config_archives_with_rkyv_and_reads_back_equal() {
+    let request = Request::StartWarmthRamp(chroma::generated::RequestStartWarmthRamp {
+        warmth_level: chroma::generated::WarmthLevel::Warm,
+        ramp_duration: chroma::generated::RampDuration::Minutes(20),
+    });
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&request).expect("archive request");
+    let read = rkyv::from_bytes::<Request, rkyv::rancor::Error>(&bytes).expect("read archived request");
+    assert_eq!(read, request);
+}
