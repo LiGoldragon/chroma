@@ -1,5 +1,27 @@
 # Upgrades
 
+## 0.8.1 — GeoClue location is held until GeoClue announces another
+
+Chroma no longer polls GeoClue. It holds one GeoClue client for the daemon's
+life and answers each `LocationUpdated` signal; a held location stays until the
+next announcement replaces it. A fix wider than 1 km, or with malformed
+accuracy, is logged and the held location stays. When `org.freedesktop.GeoClue2`
+changes owner on the system bus, that `NameOwnerChanged` event reconnects the
+client. Resume, config reload and schedule deadlines no longer read GeoClue.
+The client still requests GeoClue's `Exact` accuracy level.
+
+Removed: the five-minute fix lease (`MAX_LOCATION_AGE`,
+`MINIMUM_SOLAR_CLOCK_VALIDITY`, `FreshLocationLease`, `FreshGeoclueLocation`),
+its renewal schedule, the 10 s and 60 s retries, the 135 s request timeout, the
+timestamp read, and the `GeoclueLocationStale`, `GeoclueLocationExpiresSoon`
+and `GeoclueInvalidTimestamp` errors. `GeoclueLocationFix::new` takes the
+location and accuracy only; `validated` returns a `LocationAnnounced` event,
+which `LocationAuthority::announce` holds. `GeoclueWatcher` is the new actor.
+
+The config format, the redb state format and the CLI wire are unchanged.
+`checks.session-dbus` runs its private-bus witnesses one at a time, since the
+theme witness reads the next `NameOwnerChanged` on the shared bus.
+
 ## 0.8.0 — ethos-zero 16.0.0: every generated type derives rkyv
 
 `ethos-zero` 16.0.0 makes every generated struct and enum derive rkyv

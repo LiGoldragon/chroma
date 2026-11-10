@@ -17,7 +17,7 @@ applies these axes belongs in this repo; anything that only
 The capability is *animating the visual state of the desktop*.
 The three axes are coordinated by proximity in one daemon, not
 by coupling of decisions. They share infrastructure (one config,
-one redb, one bounded geoclue location read path, one CLI, one
+one redb, one GeoClue location subscription, one CLI, one
 socket); their scheduled events do not share fires.
 
 ---
@@ -53,9 +53,10 @@ report, not a pull request.
    source of truth.
 
 5. **Push, not poll.** Schedule fires are Kameo delayed
-   messages (timerfd-backed). Geoclue is read only when civil
-   triggers need a location and retried by bounded delayed actor
-   message if unavailable. Config reload is inotify. CLI
+   messages (timerfd-backed). GeoClue pushes each location as
+   `LocationUpdated` to the one lifelong client; a held location
+   stays until the next announcement, and a GeoClue owner change
+   reconnects the client. Config reload is inotify. CLI
    commands are UDS frames. Property writes are zbus method
    calls. There is no loop-and-check anywhere. The carve-outs in
    `~/primary/skills/push-not-pull.md` (reachability probes,

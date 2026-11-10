@@ -18,7 +18,7 @@ pub struct SolarClockProjection {
 }
 
 impl SolarClockProjection {
-    /// Compute a local apparent-solar correction from a fresh GeoClue location.
+    /// Compute a local apparent-solar correction from the held GeoClue location.
     pub fn at(location: Location, now: DateTime<Utc>) -> Self {
         let fractional_hour = now.hour() as f64 + now.minute() as f64 / 60.0 + now.second() as f64 / 3600.0;
         let days_in_year = if now.date_naive().leap_year() { 366.0 } else { 365.0 };

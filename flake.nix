@@ -94,7 +94,7 @@
           checkPhase = ''
             runHook preCheck
             dbus-run-session --config-file ${pkgs.dbus}/share/dbus-1/session.conf -- \
-              cargo test --release --locked --lib -- --ignored
+              cargo test --release --locked --lib -- --ignored --test-threads=1
             runHook postCheck
           '';
         });

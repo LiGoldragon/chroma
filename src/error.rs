@@ -39,7 +39,7 @@ pub enum Error {
     #[error("geoclue delivered a root location path")]
     GeoclueRootLocation,
 
-    /// GeoClue ended the location-update subscription without a location.
+    /// The location-update subscription ended: its bus connection is gone.
     #[error("geoclue location-update stream ended")]
     GeoclueLocationUpdateStreamEnded,
 
@@ -50,19 +50,6 @@ pub enum Error {
     /// GeoClue returned a valid but too-imprecise location for solar schedules.
     #[error("geoclue location accuracy exceeds Chroma's 1 km limit ({accuracy_meters:.0}m)")]
     GeoclueLocationImprecise { accuracy_meters: f64 },
-
-    /// GeoClue returned a location whose measurement timestamp is not usable.
-    #[error("geoclue returned an invalid location timestamp")]
-    GeoclueInvalidTimestamp,
-
-    /// GeoClue returned a location older than Chroma's freshness boundary.
-    #[error("geoclue location is stale ({age_seconds}s old)")]
-    GeoclueLocationStale { age_seconds: u64 },
-
-    /// GeoClue returned a technically fresh location that would expire before
-    /// the next coarse solar-clock status interval.
-    #[error("geoclue location expires too soon ({remaining_seconds}s remaining)")]
-    GeoclueLocationExpiresSoon { remaining_seconds: u64 },
 
     /// The redb database could not be opened or created.
     #[error("redb database: {0}")]

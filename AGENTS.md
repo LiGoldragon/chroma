@@ -15,7 +15,7 @@ It replaces darkman + the `nightshift-*` systemd services + the
 - **Three independent axes.** Theme, warmth, and brightness are
   coordinated by **proximity in one daemon**, not by **coupling
   of decisions**. The axes share infrastructure (one config, one
-  redb, one bounded geoclue location read path, one CLI, one
+  redb, one GeoClue location subscription, one CLI, one
   socket); their
   scheduled events do not share fires.
 - **Native and resident theme concerns.** `chroma` owns terminal,
@@ -34,9 +34,11 @@ It replaces darkman + the `nightshift-*` systemd services + the
 - **Push-not-poll throughout.** Deadlines push via Kameo delayed
   messages (timerfd-backed); inotify pushes config reloads; UDS
   frames push CLI commands; zbus pushes property writes to
-  wl-gammarelay-rs. Geoclue is read only when civil triggers need
-  a location and retried by bounded delayed actor message if it
-  is unavailable. There is no `loop { check_time(); sleep(N); }`
+  wl-gammarelay-rs. GeoClue pushes locations: Chroma holds one
+  client for its life and answers each `LocationUpdated`; a held
+  location stays until GeoClue announces another, and a GeoClue
+  owner change on the bus reconnects the client. No location
+  timer, expiry, renewal, or retry exists. There is no `loop { check_time(); sleep(N); }`
   anywhere. See the push-not-pull discipline.
 - **rkyv on the wire, Datom at the human boundary.** Daemon ↔
   CLI is rkyv-archived `Request` / `Response` frames

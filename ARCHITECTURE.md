@@ -30,8 +30,8 @@ Chroma owns:
 - the typed CLI request grammar (`Request` / `Response`)
 - the IPC contract between CLI and daemon (rkyv-on-UDS)
 - the schema-authored configuration and palette grammar (`Config`, Datom on disk)
-- the bounded geoclue2 system-bus location read when twilight
-  triggers are used
+- the lifelong geoclue2 system-bus client and its `LocationUpdated`
+  subscription
 - the orchestration of ramps (start, interrupt, replace)
 - the native theme application concerns: terminal, desktop/GTK,
   Ghostty, and running Pi sessions
@@ -106,7 +106,7 @@ Supervisor
 ├── BrightnessApplier                (zbus to wl-gammarelay-rs Brightness)
 │   └── generation-cancelled ramp task owned by BrightnessApplier
 ├── ScheduleEngine                   (parsed config, next-fire deadline)
-│   └── Geoclue location read when civil triggers are present
+├── GeoclueWatcher                   (GeoClue LocationUpdated and owner-change push)
 ├── SleepTransitionWatcher           (logind PrepareForSleep resume push)
 └── Socket accept loop               (UDS at $XDG_RUNTIME_DIR/chroma.sock)
 
@@ -155,10 +155,14 @@ runtime validates that generated value into typed `Config`:
 Each schedule is `Manual.<level>` or `Scheduled.{<waypoints> <default>}`.
 Solar triggers are `Sunrise.<signed-minutes>`, `Sunset.<signed-minutes>`,
 `CivilDawn.<signed-minutes>`, and `CivilDusk.<signed-minutes>`; wall-clock
-triggers are `TimeOfDay.{hour minute}`. The geoclue read runs iff any axis uses a
-solar trigger; if geolocation is unavailable, the schedule actor
-retries on a bounded delayed message instead of running a polling
-loop.
+triggers are `TimeOfDay.{hour minute}`. Chroma holds one GeoClue client for
+its whole life and answers each `LocationUpdated` signal with one property read.
+A fix within 1 km accuracy is announced to the root, which holds it until GeoClue
+announces another; a wider fix is logged and the held location stays. GeoClue's
+static source announces once per client and again only when its location changes
+at a deployment. When `org.freedesktop.GeoClue2` changes owner on the bus, that
+`NameOwnerChanged` event reconnects the client. No location timer, age, expiry,
+renewal, or retry exists; until a location is known, civil axes wait.
 Daemon startup first reapplies the persisted visual state to the
 appliers, then evaluates the schedule. If a civil-trigger axis has
 no held or persisted location yet, that axis is left unchanged
@@ -167,13 +171,12 @@ substitute for an unresolved civil dawn/dusk answer.
 Resume from suspend is another schedule input: Chroma subscribes
 to systemd-logind's `PrepareForSleep` signal and reconciles the
 current wall-clock schedule immediately on the post-resume
-transition. Geolocation refresh is a separate delayed flow after
-resume so a slow or cold geoclue read cannot block time-of-day
-theme, warmth, or brightness changes. If the fresh location differs
-from the schedule actor's held location, Chroma persists it and
-reconciles the schedule again using that location. Reconciliation projects
+transition. Location is not part of resume: it arrives only as a GeoClue
+announcement. If an announced location differs from the schedule actor's
+held location, Chroma persists it and reconciles the schedule again using
+that location. Reconciliation projects
 wanted state, but the root applies only values that differ from the visual state
-it already owns; repeated deadline evaluation and fresh location fixes therefore
+it already owns; repeated deadline evaluation and location announcements therefore
 do not rewrite theme files, reload applications, restart ramps, or repeat gamma
 writes when the projection is unchanged. Each schedule reconciliation increments
 a generation counter so stale delayed messages from before suspend or config
@@ -204,10 +207,10 @@ is reconciled from the current wall-clock projection before it writes to the
 relay after restart. An absent `warmth-state` record leaves warmth unknown;
 the obsolete single-value `warmth` table is intentionally ignored rather
 than interpreted as a current physical state. The
-schedule engine also persists last-known geolocation after a
-successful geoclue refresh so daemon startup can perform immediate
-civil-trigger reconciliation from the last known position while a
-fresh geolocation request runs separately. The version-skew guard at
+schedule engine also persists last-known geolocation after each
+changed GeoClue announcement so daemon startup can perform immediate
+civil-trigger reconciliation from the last known position until GeoClue
+announces the current one. The version-skew guard at
 boot hard-fails on mismatch.
 
 ## Boundary contracts
@@ -222,7 +225,7 @@ boot hard-fails on mismatch.
 | Daemon ↔ mutable Ghostty config | `$XDG_CONFIG_HOME/ghostty/config.ghostty` |
 | Daemon ↔ running Pi sessions | Unix-stream line frame (`dark\n` or `light\n`) at the configured socket |
 | Daemon ↔ wl-gammarelay-rs | zbus property writes (`Temperature` u16, `Brightness` f64) |
-| Daemon ↔ geoclue2 | bounded zbus system-bus location read |
+| Daemon ↔ geoclue2 | lifelong zbus system-bus client: `LocationUpdated` and `NameOwnerChanged` signals |
 | Daemon ↔ theme concerns | typed Rust values; no apply-command schema |
 | Daemon ↔ human (audit) | generated Datom reply printed by the CLI |
 

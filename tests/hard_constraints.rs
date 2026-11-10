@@ -88,13 +88,13 @@ fn hc_chroma_012_geoclue_uses_system_bus_and_waits_for_location_updated() {
     let daemon_source = include_str!("../src/daemon.rs");
     let geoclue_source = include_str!("../src/geoclue.rs");
 
-    assert!(daemon_source.contains("zbus::Connection::system().await?"));
+    assert!(daemon_source.contains("zbus::Connection::system().await"));
+    assert!(daemon_source.contains("GeoclueWatcher::start(connection"));
     assert!(!daemon_source.contains("zbus::Connection::session().await?"));
-    assert!(daemon_source.contains("receive_signal(\"LocationUpdated\")"));
-    assert!(!daemon_source.contains("client.get_property(\"Location\")"));
+    assert!(geoclue_source.contains("receive_signal(\"LocationUpdated\")"));
+    assert!(!geoclue_source.contains("get_property(\"Location\")"));
     assert!(geoclue_source.contains("GeoclueLocationUpdateAwaiter"));
     assert!(geoclue_source.contains("GeoclueRootLocation"));
-    assert!(geoclue_source.contains("GeoclueLocationStale"));
 }
 
 #[test]
@@ -107,7 +107,7 @@ fn hc_chroma_013_resume_reconciles_schedule_from_login1_prepare_for_sleep() {
     assert!(daemon_source.contains("PrepareForSleep"));
     assert!(daemon_source.contains("deserialize::<bool>()"));
     assert!(daemon_source.contains("struct ResumeFromSleep"));
-    assert!(daemon_source.contains("tell(ResumeSchedule)"));
+    assert!(daemon_source.contains("schedule_engine.tell(ReconcileSchedule)"));
 }
 
 #[test]
@@ -123,21 +123,22 @@ fn hc_chroma_014_schedule_reconcile_cancels_stale_deadline_chains() {
 }
 
 #[test]
-fn hc_chroma_015_resume_location_refresh_is_separate_from_time_reconcile() {
+fn hc_chroma_015_location_is_held_until_geoclue_announces_another() {
     let daemon_source = include_str!("../src/daemon.rs");
+    let geoclue_runtime = include_str!("../src/geoclue.rs").split("#[cfg(test)]").next().expect("runtime source");
 
-    assert!(daemon_source.contains("struct ResumeSchedule"));
-    assert!(daemon_source.contains("self.reconcile(generation, context).await;"));
-    assert!(daemon_source.contains("POST_RESUME_LOCATION_REFRESH_DELAY"));
-    assert!(daemon_source.contains("struct LocationRefreshDue"));
-    assert!(daemon_source.contains("struct LocationRefreshCompleted"));
-    assert!(daemon_source.contains("context.spawn(async move"));
-    assert!(daemon_source.contains("let location = ScheduleEngine::current_location().await;"));
-    assert!(daemon_source.contains("chroma-daemon accepted fresh GeoClue location"));
-    assert!(daemon_source.contains("chroma-daemon recomputed solar schedule from fresh GeoClue location"));
-    assert!(daemon_source.contains("Some(fresh_location) =>"));
-    assert!(daemon_source.contains("fresh_location.refresh_delay_at"));
-    assert!(daemon_source.contains("self.request_location_refresh(context, Duration::ZERO);"));
+    assert!(geoclue_runtime.contains("receive_signal_with_args(\"NameOwnerChanged\", &[(0, GEOCLUE_SERVICE)])"));
+    assert!(geoclue_runtime.contains("fn answer_owner_change"));
+    assert!(geoclue_runtime.contains("Err(Error::GeoclueLocationUpdateStreamEnded) =>"));
+    assert!(daemon_source.contains("impl Message<LocationAnnounced> for ChromaRoot"));
+    assert!(daemon_source.contains("impl Message<LocationAnnounced> for ScheduleEngine"));
+    assert!(daemon_source.contains("self.location_authority.announce(message);"));
+    for timer in ["tokio::time", "send_after", "sleep(", "interval(", "timeout(", "SystemTime", "Duration"] {
+        assert!(!geoclue_runtime.contains(timer), "the GeoClue path answers events, never a timer: {timer}");
+    }
+    for removed in ["LocationRefreshDue", "request_location_refresh", "RETRY_DELAY", "GEOCLUE_REQUEST_TIMEOUT"] {
+        assert!(!daemon_source.contains(removed), "no location renewal or retry remains: {removed}");
+    }
 }
 
 #[test]
@@ -181,18 +182,6 @@ fn hc_chroma_018_schedule_projects_elapsed_ramp_time() {
     assert!(schedule_source.contains("interpolate_toward"));
     assert!(daemon_source.contains("WarmthApplication::RampFrom"));
     assert!(daemon_source.contains("BrightnessApplication::RampFrom"));
-}
-
-#[test]
-fn hc_chroma_018_stale_location_refresh_retries_with_a_held_location() {
-    let daemon_source = include_str!("../src/daemon.rs");
-    let geoclue_source = include_str!("../src/geoclue.rs");
-
-    assert!(daemon_source.contains("const LOCATION_RENEWAL_RETRY_DELAY: Duration = Duration::from_secs(10);"));
-    assert!(daemon_source.contains("self.location_lease.has_held()"));
-    assert!(daemon_source.contains("self.location_lease.renew(fresh_location);"));
-    assert!(geoclue_source.contains("pub struct FreshLocationLease"));
-    assert!(geoclue_source.contains("self.held.filter(|location| location.is_current_at(now))"));
 }
 
 #[test]

@@ -101,8 +101,8 @@ Suspend does not satisfy a wall-clock visual schedule. Chroma
 subscribes to the systemd-logind `PrepareForSleep` signal on the
 system bus and treats the post-resume `false` transition as a
 schedule reconciliation request. It does not wait for the old
-monotonic delayed message to expire after wake. The wall-clock
-reconciliation runs before geolocation refresh.
+monotonic delayed message to expire after wake. Resume does not
+touch location; location arrives only as a GeoClue announcement.
 
 Test: `hc_chroma_013_resume_reconciles_schedule_from_login1_prepare_for_sleep`.
 
@@ -115,15 +115,24 @@ new deadline chain.
 
 Test: `hc_chroma_014_schedule_reconcile_cancels_stale_deadline_chains`.
 
-## HC-CHROMA-011 — Location Refresh Is A Separate Resume Flow
+## HC-CHROMA-011 — A Location Is Held Until GeoClue Announces Another
 
-Resume schedules a delayed geolocation refresh after the immediate
-wall-clock reconciliation. The geolocation read must not block
-time-of-day visual changes. If the fresh location differs from the
-location held by the schedule actor, the actor reconciles the
-schedule again using the new location.
+Chroma holds one GeoClue client for its whole life and answers each
+`LocationUpdated` signal. A validated fix is held until the next
+announcement replaces it; a fix that fails validation is logged and
+the held location stays. Every location action answers an event:
+`LocationUpdated`, `NameOwnerChanged` for `org.freedesktop.GeoClue2`,
+or the subscription ending. The location path has no timer, age,
+expiry, renewal schedule, or retry. If an announced location differs
+from the location held by the schedule actor, the actor persists it
+and reconciles the schedule again using it.
 
-Test: `hc_chroma_015_resume_location_refresh_is_separate_from_time_reconcile`.
+Tests:
+
+- `hc_chroma_015_location_is_held_until_geoclue_announces_another`
+- `held_location_is_kept_until_a_location_updated_replaces_it`
+- `held_location_is_kept_without_renewal_and_replaced_by_location_updated`
+  (private bus, `checks.session-dbus`)
 
 ## HC-CHROMA-012 — Missing Location Never Applies Civil Defaults
 
@@ -131,10 +140,10 @@ Daemon startup reapplies the persisted visual state before schedule
 evaluation. A scheduled axis that contains civil dawn/dusk triggers
 and has no held location must not apply its configured default as if
 it were a real daytime/nighttime answer; that axis waits unchanged
-while a separate geolocation refresh runs. Last-known geolocation is
+until GeoClue announces a location. Last-known geolocation is
 persisted and may be used for immediate wall-clock reconciliation,
-then corrected by the fresh geolocation flow if the platform reports
-a different location.
+then corrected by the next GeoClue announcement if the platform
+reports a different location.
 
 Test: `hc_chroma_016_startup_reapplies_state_and_civil_axes_wait_for_location`.
 
@@ -173,7 +182,7 @@ Tests:
 A schedule evaluation describes desired visual state; it is not itself a
 state-change event. The root compares each scheduled value with the value it
 already owns and applies only real changes. Repeated deadline evaluation or a
-fresh GeoClue fix must not rewrite theme files, reload Ghostty, restart an
+GeoClue announcement must not rewrite theme files, reload Ghostty, restart an
 in-progress ramp, or repeat an unchanged gamma write.
 
 Explicit CLI setters and daemon startup reapplication remain authoritative

@@ -20,15 +20,12 @@ use kameo::reply::DelegatedReply;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher, recommended_watcher};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::time::{Duration, Instant, MissedTickBehavior, interval, timeout};
-use zbus::zvariant::OwnedObjectPath;
 
 use crate::brightness::BrightnessPercent;
 use crate::config::{Config, ConfigFile};
 use crate::error::{Error, Result};
 use crate::gamma::GammaClient;
-use crate::geoclue::{
-    FreshGeoclueLocation, FreshLocationLease, GeoclueLocationFix, GeoclueLocationUpdate, GeoclueLocationUpdateAwaiter,
-};
+use crate::geoclue::{GeoclueWatcher, LocationAnnounced, LocationAuthority};
 use crate::request::Request;
 use crate::response::Response;
 use crate::schedule::{Location, SchedulePlan, ScheduledBrightness, ScheduledValues, ScheduledWarmth};
@@ -46,20 +43,6 @@ use crate::time::RampDuration;
 use crate::warmth::KelvinTemperature;
 use crate::wire::{read_frame, socket_path, write_frame};
 
-// Renewal begins two minutes before expiry and keeps the GeoClue client alive
-// long enough to receive the provider's next physical fix instead of repeatedly
-// consuming and discarding the same cached LocationUpdated value.
-const GEOCLUE_REQUEST_TIMEOUT: Duration = Duration::from_secs(135);
-// GeoClue's public GClueAccuracyLevel enum assigns 8 to Exact. Requesting
-// Country (1) makes the static source add a privacy margin, turning an exact
-// 1 km configured fix into a 4 km result that Chroma must reject.
-const GEOCLUE_ACCURACY_LEVEL_EXACT: u32 = 8;
-const POST_RESUME_LOCATION_REFRESH_DELAY: Duration = Duration::from_secs(5);
-// A stale GeoClue cache may outlive an otherwise valid held location. Retry
-// well inside the renewal margin while retaining that held fix until expiry.
-const LOCATION_RENEWAL_RETRY_DELAY: Duration = Duration::from_secs(10);
-const LOCATION_UNAVAILABLE_RETRY_DELAY: Duration = Duration::from_secs(60);
-
 /// Run the daemon until SIGTERM / Ctrl-C.
 pub async fn run() -> Result<()> {
     let config_file = ConfigFile::from_default_locations()?;
@@ -70,6 +53,13 @@ pub async fn run() -> Result<()> {
     let sleep_watcher = SleepTransitionWatcher::start(root.clone()).await;
     root.ask(ReapplyCurrentState).await.map_err(|error| Error::ActorCall { message: error.to_string() })?;
     root.ask(BeginSchedule).await.map_err(|error| Error::ActorCall { message: error.to_string() })?;
+    let geoclue_watcher = match zbus::Connection::system().await {
+        Ok(connection) => Some(GeoclueWatcher::start(connection, root.clone().recipient()).await),
+        Err(error) => {
+            eprintln!("chroma-daemon geoclue system bus error: {error}; no GeoClue location events will arrive");
+            None
+        }
+    };
 
     let path = socket_path();
     if path.exists() {
@@ -99,6 +89,10 @@ pub async fn run() -> Result<()> {
 
     let _ = config_watcher.stop_gracefully().await;
     let _ = sleep_watcher.stop_gracefully().await;
+    if let Some(geoclue_watcher) = geoclue_watcher.as_ref() {
+        let _ = geoclue_watcher.stop_gracefully().await;
+        geoclue_watcher.wait_for_shutdown().await;
+    }
     theme_dbus_service.stop().await;
     sleep_watcher.wait_for_shutdown().await;
     config_watcher.wait_for_shutdown().await;
@@ -132,6 +126,7 @@ pub(crate) struct ChromaRoot {
     warmth: Option<StoredWarmthState>,
     warmth_fallback: KelvinTemperature,
     brightness: BrightnessPercent,
+    location_authority: LocationAuthority,
     state_store: ActorRef<StateStore>,
     theme_applier: ActorRef<ThemeApplier>,
     warmth_applier: ActorRef<WarmthApplier>,
@@ -179,6 +174,7 @@ impl ChromaRoot {
             warmth: stored.warmth,
             warmth_fallback: config.warmth.schedule.default_level().kelvin(),
             brightness: stored.percent,
+            location_authority: LocationAuthority::default(),
             state_store: state_store.clone(),
             theme_applier,
             warmth_applier,
@@ -348,26 +344,21 @@ impl ChromaRoot {
                 kelvin: self.warmth.map(StoredWarmthState::desired_kelvin).unwrap_or(self.warmth_fallback),
                 percent: self.brightness,
             }),
-            Request::GetSolarClock => self.solar_clock().await,
+            Request::GetSolarClock => Ok(self.solar_clock()),
         }
     }
 
-    async fn solar_clock(&self) -> Result<Response> {
-        let schedule_engine = self
-            .schedule_engine
-            .as_ref()
-            .ok_or_else(|| Error::Daemon { message: "schedule engine is not installed".into() })?;
-        let projection = schedule_engine
-            .ask(ReadSolarClock)
-            .await
-            .map_err(|error| Error::ActorCall { message: error.to_string() })?;
-        Ok(match projection {
-            Some(projection) => Response::SolarClock {
-                utc_offset_seconds: projection.utc_offset_seconds(),
-                equation_of_time_valid_until_unix_seconds: projection.equation_of_time_valid_until_unix_seconds(),
-            },
+    fn solar_clock(&self) -> Response {
+        match self.location_authority.location() {
+            Some(location) => {
+                let projection = SolarClockProjection::at(location, chrono::Utc::now());
+                Response::SolarClock {
+                    utc_offset_seconds: projection.utc_offset_seconds(),
+                    equation_of_time_valid_until_unix_seconds: projection.equation_of_time_valid_until_unix_seconds(),
+                }
+            }
             None => Response::SolarClockUnavailable,
-        })
+        }
     }
 
     async fn apply_scheduled_state(&mut self, values: ScheduledValues) -> Result<()> {
@@ -671,8 +662,23 @@ impl Message<ResumeFromSleep> for ChromaRoot {
             eprintln!("chroma-daemon resume ignored because schedule engine is not installed");
             return;
         };
-        if let Err(error) = schedule_engine.tell(ResumeSchedule).await {
+        if let Err(error) = schedule_engine.tell(ReconcileSchedule).await {
             eprintln!("chroma-daemon resume schedule enqueue error: {error}");
+        }
+    }
+}
+
+impl Message<LocationAnnounced> for ChromaRoot {
+    type Reply = ();
+
+    async fn handle(&mut self, message: LocationAnnounced, _context: &mut Context<Self, Self::Reply>) {
+        self.location_authority.announce(message);
+        let Some(schedule_engine) = self.schedule_engine.as_ref() else {
+            eprintln!("chroma-daemon location held; schedule engine is not installed");
+            return;
+        };
+        if let Err(error) = schedule_engine.tell(message).await {
+            eprintln!("chroma-daemon location announcement enqueue error: {error}");
         }
     }
 }
@@ -1158,9 +1164,7 @@ struct ScheduleEngine {
     root: ActorRef<ChromaRoot>,
     state_store: ActorRef<StateStore>,
     location: Option<Location>,
-    location_lease: FreshLocationLease,
     schedule_generation: u64,
-    location_generation: u64,
     preserve_persisted_theme_on_start: bool,
 }
 
@@ -1178,39 +1182,9 @@ impl ScheduleEngine {
         reference
     }
 
-    async fn current_location() -> Option<FreshGeoclueLocation> {
-        match timeout(GEOCLUE_REQUEST_TIMEOUT, async {
-            let locator = GeoclueLocator::from_system().await?;
-            locator.current_location().await
-        })
-        .await
-        {
-            Ok(Ok(location)) => Some(location),
-            Ok(Err(error)) => {
-                eprintln!("chroma-daemon geoclue location error: {error}");
-                None
-            }
-            Err(_) => {
-                eprintln!("chroma-daemon geoclue location timed out");
-                None
-            }
-        }
-    }
-
     fn next_schedule_generation(&mut self) -> u64 {
         self.schedule_generation = self.schedule_generation.saturating_add(1);
         self.schedule_generation
-    }
-
-    fn request_location_refresh(&mut self, context: &mut Context<Self, ()>, delay: Duration) {
-        self.location_generation = self.location_generation.saturating_add(1);
-        let generation = self.location_generation;
-        let delivery = context.actor_ref().tell(LocationRefreshDue { generation });
-        if delay.is_zero() {
-            let _sent = delivery.try_send();
-        } else {
-            let _scheduled = delivery.send_after(delay);
-        }
     }
 
     async fn reconcile(&mut self, generation: u64, context: &mut Context<Self, ()>) {
@@ -1223,48 +1197,20 @@ impl ScheduleEngine {
         }
         if let Some(next) = plan.next_delay_from(now) {
             let _scheduled = context.actor_ref().tell(ScheduledScheduleEvaluation { generation }).send_after(next);
-        } else if self.config.needs_geolocation() && self.location.is_none() {
-            let _retry = context
-                .actor_ref()
-                .tell(ScheduledScheduleEvaluation { generation })
-                .send_after(LOCATION_UNAVAILABLE_RETRY_DELAY);
         }
     }
 
-    async fn complete_location_refresh(
-        &mut self,
-        generation: u64,
-        location: Option<FreshGeoclueLocation>,
-        context: &mut Context<Self, ()>,
-    ) {
-        if generation != self.location_generation {
+    async fn hold_location(&mut self, location: Location, context: &mut Context<Self, ()>) {
+        if self.location == Some(location) {
             return;
         }
-        match location {
-            Some(fresh_location) => {
-                let location = fresh_location.location();
-                if self.location != Some(location) {
-                    if let Err(error) = self.state_store.ask(RecordLocation { location }).await {
-                        eprintln!("chroma-daemon location persist error: {error}");
-                    }
-                    self.location = Some(location);
-                }
-                let refresh_delay = fresh_location.refresh_delay_at(std::time::SystemTime::now());
-                self.location_lease.renew(fresh_location);
-                let schedule_generation = self.next_schedule_generation();
-                self.reconcile(schedule_generation, context).await;
-                self.request_location_refresh(context, refresh_delay);
-                eprintln!("chroma-daemon recomputed solar schedule from fresh GeoClue location");
-            }
-            None => {
-                let retry_delay = if self.location_lease.has_held() {
-                    LOCATION_RENEWAL_RETRY_DELAY
-                } else {
-                    LOCATION_UNAVAILABLE_RETRY_DELAY
-                };
-                self.request_location_refresh(context, retry_delay);
-            }
+        if let Err(error) = self.state_store.ask(RecordLocation { location }).await {
+            eprintln!("chroma-daemon location persist error: {error}");
         }
+        self.location = Some(location);
+        let generation = self.next_schedule_generation();
+        self.reconcile(generation, context).await;
+        eprintln!("chroma-daemon recomputed solar schedule from announced GeoClue location");
     }
 }
 
@@ -1286,23 +1232,9 @@ impl Actor for ScheduleEngine {
             root: args.root,
             state_store: args.state_store,
             location: args.location,
-            location_lease: FreshLocationLease::new(),
             schedule_generation: 0,
-            location_generation: 0,
             preserve_persisted_theme_on_start: args.preserve_persisted_theme_on_start,
         })
-    }
-}
-
-struct ResumeSchedule;
-
-impl Message<ResumeSchedule> for ScheduleEngine {
-    type Reply = ();
-
-    async fn handle(&mut self, _message: ResumeSchedule, context: &mut Context<Self, Self::Reply>) {
-        let generation = self.next_schedule_generation();
-        self.reconcile(generation, context).await;
-        self.request_location_refresh(context, POST_RESUME_LOCATION_REFRESH_DELAY);
     }
 }
 
@@ -1314,7 +1246,6 @@ impl Message<ReconcileSchedule> for ScheduleEngine {
     async fn handle(&mut self, _message: ReconcileSchedule, context: &mut Context<Self, Self::Reply>) {
         let generation = self.next_schedule_generation();
         self.reconcile(generation, context).await;
-        self.request_location_refresh(context, Duration::ZERO);
     }
 }
 
@@ -1328,211 +1259,14 @@ impl Message<ScheduledScheduleEvaluation> for ScheduleEngine {
     async fn handle(&mut self, message: ScheduledScheduleEvaluation, context: &mut Context<Self, Self::Reply>) {
         if message.generation == self.schedule_generation {
             self.reconcile(message.generation, context).await;
-            self.request_location_refresh(context, Duration::ZERO);
         }
     }
 }
 
-struct LocationRefreshDue {
-    generation: u64,
-}
-
-impl Message<LocationRefreshDue> for ScheduleEngine {
-    type Reply = DelegatedReply<()>;
-
-    async fn handle(&mut self, message: LocationRefreshDue, context: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        if message.generation != self.location_generation {
-            return context.spawn(async {});
-        }
-        let actor = context.actor_ref().clone();
-        context.spawn(async move {
-            let location = ScheduleEngine::current_location().await;
-            if let Err(error) = actor.tell(LocationRefreshCompleted { generation: message.generation, location }).await
-            {
-                eprintln!("chroma-daemon location refresh completion enqueue error: {error}");
-            }
-        })
-    }
-}
-
-struct LocationRefreshCompleted {
-    generation: u64,
-    location: Option<FreshGeoclueLocation>,
-}
-
-struct ReadSolarClock;
-
-impl Message<ReadSolarClock> for ScheduleEngine {
-    type Reply = Option<SolarClockProjection>;
-
-    async fn handle(&mut self, _message: ReadSolarClock, _context: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        self.location_lease
-            .current_at(std::time::SystemTime::now())
-            .map(|location| SolarClockProjection::at(location.location(), chrono::Utc::now()))
-    }
-}
-
-impl Message<LocationRefreshCompleted> for ScheduleEngine {
+impl Message<LocationAnnounced> for ScheduleEngine {
     type Reply = ();
 
-    async fn handle(&mut self, message: LocationRefreshCompleted, context: &mut Context<Self, Self::Reply>) {
-        self.complete_location_refresh(message.generation, message.location, context).await;
-    }
-}
-
-struct GeoclueLocator {
-    connection: zbus::Connection,
-}
-
-impl GeoclueLocator {
-    async fn from_system() -> Result<Self> {
-        Ok(Self { connection: zbus::Connection::system().await? })
-    }
-
-    async fn current_location(&self) -> Result<FreshGeoclueLocation> {
-        self.await_location_update().await
-    }
-
-    async fn configure_client(client: &zbus::Proxy<'_>) -> Result<()> {
-        client.set_property("DesktopId", "chroma").await?;
-        client.set_property("RequestedAccuracyLevel", GEOCLUE_ACCURACY_LEVEL_EXACT).await?;
-        Ok(())
-    }
-
-    async fn await_location_update(&self) -> Result<FreshGeoclueLocation> {
-        let manager = zbus::Proxy::new(
-            &self.connection,
-            "org.freedesktop.GeoClue2",
-            "/org/freedesktop/GeoClue2/Manager",
-            "org.freedesktop.GeoClue2.Manager",
-        )
-        .await?;
-        let client_path: OwnedObjectPath = manager.call("CreateClient", &()).await?;
-        let client = zbus::Proxy::new(
-            &self.connection,
-            "org.freedesktop.GeoClue2",
-            client_path,
-            "org.freedesktop.GeoClue2.Client",
-        )
-        .await?;
-        Self::configure_client(&client).await?;
-
-        let updates = client.receive_signal("LocationUpdated").await?.map(|message| {
-            message
-                .body()
-                .deserialize::<(OwnedObjectPath, OwnedObjectPath)>()
-                .map(GeoclueLocationUpdate::from_signal_body)
-                .map_err(Error::from)
-        });
-        let mut location_updates = GeoclueLocationUpdateAwaiter::new(updates);
-        let result = async {
-            let _: () = client.call("Start", &()).await?;
-            loop {
-                let location_path = location_updates.location_path().await?;
-                let location = zbus::Proxy::new(
-                    &self.connection,
-                    "org.freedesktop.GeoClue2",
-                    location_path,
-                    "org.freedesktop.GeoClue2.Location",
-                )
-                .await?;
-                let latitude: f64 = location.get_property("Latitude").await?;
-                let longitude: f64 = location.get_property("Longitude").await?;
-                let accuracy_meters: f64 = location.get_property("Accuracy").await?;
-                let timestamp: (u64, u64) = location.get_property("Timestamp").await?;
-                match GeoclueLocationFix::new(Location { latitude, longitude }, accuracy_meters, timestamp)
-                    .location_at(std::time::SystemTime::now())
-                {
-                    Ok(location) => {
-                        eprintln!(
-                            "chroma-daemon accepted fresh GeoClue location (accuracy: {:.0}m)",
-                            accuracy_meters
-                        );
-                        break Ok(location);
-                    }
-                    Err(Error::GeoclueLocationExpiresSoon { remaining_seconds }) => {
-                        eprintln!(
-                            "chroma-daemon retained held location while cached GeoClue fix had {remaining_seconds}s remaining"
-                        );
-                    }
-                    Err(Error::GeoclueLocationStale { age_seconds }) => {
-                        eprintln!(
-                            "chroma-daemon retained held location while cached GeoClue fix was {age_seconds}s old"
-                        );
-                    }
-                    Err(error) => break Err(error),
-                }
-            }
-        }
-        .await;
-        let _: std::result::Result<(), zbus::Error> = client.call("Stop", &()).await;
-        result
-    }
-}
-
-#[cfg(test)]
-mod geoclue_client_dbus_tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicU32, Ordering};
-
-    use super::GeoclueLocator;
-    use zbus::Connection;
-
-    struct FakeGeoclueClient {
-        requested_accuracy_level: Arc<AtomicU32>,
-    }
-
-    #[zbus::interface(name = "org.freedesktop.GeoClue2.Client")]
-    impl FakeGeoclueClient {
-        #[zbus(property)]
-        fn desktop_id(&self) -> &str {
-            "chroma"
-        }
-
-        #[zbus(property)]
-        fn set_desktop_id(&self, _value: &str) {}
-
-        #[zbus(property)]
-        fn requested_accuracy_level(&self) -> u32 {
-            self.requested_accuracy_level.load(Ordering::SeqCst)
-        }
-
-        #[zbus(property)]
-        fn set_requested_accuracy_level(&self, value: u32) {
-            self.requested_accuracy_level.store(value, Ordering::SeqCst);
-        }
-    }
-
-    #[tokio::test]
-    #[ignore = "run under dbus-run-session; this captures Chroma's real GeoClue client property request"]
-    async fn geoclue_client_requests_exact_accuracy_over_dbus() {
-        let service = Connection::session().await.expect("private bus is required");
-        service.request_name("org.freedesktop.GeoClue2").await.expect("own fake GeoClue name");
-        let requested_accuracy_level = Arc::new(AtomicU32::new(0));
-        service
-            .object_server()
-            .at(
-                "/org/freedesktop/GeoClue2/Client/test",
-                FakeGeoclueClient { requested_accuracy_level: Arc::clone(&requested_accuracy_level) },
-            )
-            .await
-            .expect("export fake GeoClue client");
-
-        let connection = Connection::session().await.expect("connect Chroma client");
-        let client = zbus::Proxy::new(
-            &connection,
-            "org.freedesktop.GeoClue2",
-            "/org/freedesktop/GeoClue2/Client/test",
-            "org.freedesktop.GeoClue2.Client",
-        )
-        .await
-        .expect("bind fake GeoClue client");
-        GeoclueLocator::configure_client(&client).await.expect("configure GeoClue client");
-
-        assert_eq!(
-            requested_accuracy_level.load(Ordering::SeqCst),
-            8,
-            "GeoClue's exact accuracy level must be requested"
-        );
+    async fn handle(&mut self, message: LocationAnnounced, context: &mut Context<Self, Self::Reply>) {
+        self.hold_location(message.location(), context).await;
     }
 }
